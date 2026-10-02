@@ -102,6 +102,43 @@ turned on.
 | `/tm projects`            | Lists every project with a history: size, last activity, and whether its folder still exists. |
 | `/tm projects rm N --yes` | Deletes project N's history.                                                                  |
 
+## Command guard
+
+Before Claude runs a shell command, the guard looks for effects undo cannot take back. In the default mode it has
+Claude Code ask you first, with the reason, even where your permission settings would let the command run; the worst
+are refused, and you can still run those yourself. In a `claude -p` run there is no one to ask, so such a command does
+not run, and Claude is told why. A command that only changes the project's files is left alone: undo covers it.
+
+| Command                   | What it does                                                                     |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| `/tm guard`               | The mode, the rules allowed in this project, and every rule.                     |
+| `/tm guard ask`           | The default: ask before a risky command, refuse the worst.                       |
+| `/tm guard warn`          | Never ask or refuse; a toast says what the command does.                         |
+| `/tm guard off`           | No questions, no warnings.                                                       |
+| `/tm guard allow RULE`    | Stop asking about one rule in this project. The refused rules cannot be allowed. |
+| `/tm guard reset`         | Ask about every rule again.                                                      |
+| `/tm guard check COMMAND` | What the guard would say about a command, without running it.                    |
+
+| Rule              | When                                                                                                                                            |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `delete-root`     | Refused. `rm` of `/`, your home folder or above it, or `--no-preserve-root`.                                                                    |
+| `disk`            | Refused. `mkfs`, `dd of=/dev/…`, a redirect into a disk device, a fork bomb.                                                                    |
+| `delete-outside`  | `rm` or `mv` of the project itself or of files outside it (temporary folders aside).                                                            |
+| `force-push`      | `git push --force`, `-f`, `--force-with-lease`, `--mirror`, a `+refspec`.                                                                       |
+| `remote-delete`   | `git push --delete`, a `:branch` refspec.                                                                                                       |
+| `history-rewrite` | `git filter-branch`, `git filter-repo`.                                                                                                         |
+| `clean-ignored`   | `git clean -x` or `-X`: ignored files, which snapshots do not keep.                                                                             |
+| `pipe-to-shell`   | `curl` or `wget` piped into a shell or an interpreter, `bash <(curl …)`, `sh -c "$(curl …)"`.                                                   |
+| `privilege`       | `sudo`, `doas`, `su`.                                                                                                                           |
+| `publish`         | `npm`/`yarn`/`pnpm`/`bun`/`cargo`/`poetry publish` (not `--dry-run`), `twine upload`, `gem push`, `docker push`.                                |
+| `infra`           | `terraform`/`tofu apply`, `destroy`, `import`; `pulumi up`; `kubectl apply`, `delete`…; `helm install`…; deletes through `aws`, `gcloud`, `az`. |
+| `database`        | `DROP` or `TRUNCATE` through `psql`, `mysql`, `sqlite3`…; `dropdb`; `prisma migrate reset`; `rails db:drop`.                                    |
+| `docker-prune`    | `docker system prune`, `docker volume rm` or `prune`.                                                                                           |
+| `persistence`     | Writes to your shell profile, `~/.ssh/` or `/etc/`; `crontab`; `launchctl load`; `systemctl enable`.                                            |
+
+The guard reads the command line as written: `sudo`, `env`, `nohup`, `timeout` and `bash -c "…"` are seen through, and
+a `cd` earlier on the same line is followed. A command assembled at run time (a variable, a script file) is not.
+
 ## Secrets
 
 | Command            | What it does                                                                                                  |

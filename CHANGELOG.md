@@ -6,6 +6,15 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+### Added
+
+- Command guard: before Claude runs a shell command whose effects undo cannot take back (a force push or remote branch
+  delete, a delete outside the project, a script piped from the network into a shell, `sudo`, a publish, a change to
+  cloud infrastructure or a database, a change to your shell profile, SSH keys or scheduled jobs), Claude Code asks you
+  first, even where your permissions would let it run. Deleting `/` or your home folder, or writing to a disk device,
+  is refused.
+- `/tm guard [ask | warn | off]`, `/tm guard allow RULE | reset` and `/tm guard check COMMAND`.
+
 ## [0.7.1] - 2026-10-02
 
 ### Security
