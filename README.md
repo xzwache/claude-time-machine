@@ -121,4 +121,23 @@ described in [SECURITY.md](SECURITY.md).
 
 ## License
 
-[MIT](LICENSE) © xzwache
+Claude Time Machine is licensed under the [MIT License](LICENSE).
+
+We chose MIT because a safety net for coding agents should be easy to adopt anywhere: in personal setups, team
+plugins, company forks and other tools built on Claude Code. Use it, change it and ship it; keep the copyright notice.
+
+See the [LICENSE](LICENSE) file for the full text.
+
+---
+
+## Support
+
+- **Documentation**: [docs/](docs/): [commands](docs/commands.md) and [architecture](docs/architecture.md)
+- **Issues**: [GitHub Issues](https://github.com/xzwache/claude-time-machine/issues)
+- **Security**: report privately, see [SECURITY.md](SECURITY.md)
+- **Repository**: [github.com/xzwache/claude-time-machine](https://github.com/xzwache/claude-time-machine)
+- **Author**: [@xzwache](https://github.com/xzwache)
+
+---
+
+**A Claude Code plugin | Plain git underneath | Made with TypeScript**
