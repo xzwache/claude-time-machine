@@ -26,6 +26,35 @@ const RULES: readonly [FindingKind, RegExp][] = [
   ['infra', /\.(tf|tfvars)$|^(k8s|kubernetes|helm|deploy)\/.+\.ya?ml$/],
 ]
 
+/**
+ * The secrets rule in .gitignore syntax: what snapshots leave out unless a
+ * project keeps its secrets. It names the same files as the `secrets` rule.
+ */
+export const SECRET_EXCLUDES = [
+  '.env',
+  '.env.*',
+  '!.env.example',
+  '!.env.sample',
+  '!.env.template',
+  '!.env.dist',
+  '.npmrc',
+  '.pypirc',
+  '.netrc',
+  'credentials',
+  'credentials.json',
+  'kubeconfig',
+  'id_rsa',
+  'id_dsa',
+  'id_ecdsa',
+  'id_ed25519',
+  '*.pem',
+  '*.key',
+  '*.p12',
+  '*.pfx',
+  '*.jks',
+  '*.keystore',
+].join('\n')
+
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const
 
 const INSTALL_SCRIPTS = new Set([
@@ -46,10 +75,15 @@ const EXECUTABLE = '100755'
 const MASS_DELETE = 20
 const SHOWN_ITEMS = 2
 const COMMAND_CHARS = 60
+export const NOT_KEPT = 'not kept, so not undoable'
 
 /** The kind of a path by its name alone; undefined for an ordinary file. */
 export function kindOfPath(path: string): FindingKind | undefined {
   return RULES.find(([, rule]) => rule.test(path))?.[0]
+}
+
+export function isSecretPath(path: string): boolean {
+  return kindOfPath(path) === 'secrets'
 }
 
 type Manifest = {
@@ -115,7 +149,8 @@ export type PathFacts = {
   manifest?: { before: string | undefined; after: string | undefined }
 }
 
-export function assess(facts: readonly PathFacts[]): Finding[] {
+/** `unkept`: secrets Claude's file tools wrote that snapshots leave out. */
+export function assess(facts: readonly PathFacts[], unkept: readonly string[] = []): Finding[] {
   const findings: Finding[] = []
   for (const fact of facts) {
     const kind = kindOfPath(fact.path)
@@ -136,6 +171,7 @@ export function assess(facts: readonly PathFacts[]): Finding[] {
   }
   const deleted = facts.filter(fact => fact.isDeleted).map(fact => fact.path)
   if (deleted.length >= MASS_DELETE) findings.push({ kind: 'mass-delete', paths: deleted, items: [] })
+  if (unkept.length > 0) findings.push({ kind: 'secrets', paths: [...unkept], items: [NOT_KEPT] })
   return findings
 }
 
@@ -195,7 +231,11 @@ function listed(items: readonly string[]): string {
 }
 
 /** The findings for the paths an entry changed, read off the shadow repository. */
-export async function findingsOf(shadow: ShadowRepo, plans: readonly PathPlan[]): Promise<Finding[]> {
+export async function findingsOf(
+  shadow: ShadowRepo,
+  plans: readonly PathPlan[],
+  unkept: readonly string[],
+): Promise<Finding[]> {
   const modesBefore = await modesAt(shadow, plans, plan => plan.before)
   const modesAfter = await modesAt(shadow, plans, plan => plan.after)
   const facts: PathFacts[] = []
@@ -216,7 +256,7 @@ export async function findingsOf(shadow: ShadowRepo, plans: readonly PathPlan[])
     }
     facts.push(fact)
   }
-  return assess(facts)
+  return assess(facts, unkept)
 }
 
 /** File modes at each plan's `pick` commit, keyed `commit:path`. */

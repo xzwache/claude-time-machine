@@ -53,6 +53,12 @@ export class TimeMachine {
     return this.shadow.gitDir
   }
 
+  /** Whether snapshots keep secrets (.env, keys…); they leave them out by default. */
+  keepSecrets(isKeeping: boolean): this {
+    this.shadow.keepSecrets(isKeeping)
+    return this
+  }
+
   /** Swaps the functions it runs with, as each hook brings its own. */
   use(deps: Deps): this {
     this.shadow.use(deps)
@@ -101,7 +107,7 @@ export class TimeMachine {
   beforeFileWrite(path: string, session: string): Promise<void> {
     return this.serial(async () => {
       const rel = await this.turnPath(path, session)
-      if (rel === undefined) return
+      if (rel === undefined || this.shadow.isUnkeptSecret(rel)) return
       if (await this.shadow.isIgnoredAndUntracked(rel)) {
         if (!(await this.shadow.existsInWorkTree(rel))) return
         await this.shadow.stage(rel, true)
@@ -118,6 +124,12 @@ export class TimeMachine {
     return this.serial(async () => {
       const rel = await this.turnPath(path, session)
       if (rel === undefined) return
+      if (this.shadow.isUnkeptSecret(rel)) {
+        const turn = await this.pending.get(session)
+        if (turn && !turn.secrets?.includes(rel))
+          await this.pending.set({ ...turn, secrets: [...(turn.secrets ?? []), rel] })
+        return
+      }
       const isIgnored = await this.shadow.isIgnoredAndUntracked(rel)
       if (!isIgnored) await this.shadow.stage(rel, false)
       else if (await this.shadow.existsInWorkTree(rel)) await this.shadow.stage(rel, true)
@@ -212,14 +224,18 @@ export class TimeMachine {
 
   /** What the security diff flags among the paths an entry changed. */
   findings(ref: string): Promise<Finding[]> {
-    return this.serial(async () => findingsOf(this.shadow, await this.log.plan(await this.required(ref))))
+    return this.serial(async () => {
+      const entry = await this.required(ref)
+      return findingsOf(this.shadow, await this.log.plan(entry), entry.secrets)
+    })
   }
 
   /** Undoes only the paths the security diff flags; undefined when it flags none. */
   undoSensitive(ref: string, isForced = false): Promise<RestoreReport | undefined> {
     return this.serial(async () => {
       const entry = await this.required(ref)
-      const paths = findingPaths(await findingsOf(this.shadow, await this.log.plan(entry)))
+      const flagged = findingPaths(await findingsOf(this.shadow, await this.log.plan(entry), entry.secrets))
+      const paths = flagged.filter(path => !this.shadow.isUnkeptSecret(path))
       if (paths.length === 0) return undefined
       return undo(this.shadow, this.log, entry, isForced, new Set(paths))
     })
@@ -339,8 +355,9 @@ export class TimeMachine {
     await this.recordOutside(turn.session, "Changes not made by Claude's tools")
     const range = await this.shadow.readRaws([`${turn.base}..${TIMELINE}`])
     const hasSteps = range.some(raw => raw.meta.kind === 'step' && raw.meta.session === turn.session)
+    const secrets = turn.secrets ?? []
     let recorded: Entry | undefined
-    if (hasSteps) {
+    if (hasSteps || secrets.length > 0) {
       const tip = await this.shadow.tip()
       const id = await this.shadow.commit(tip.tree, tip.commit, {
         kind: 'turn',
@@ -350,6 +367,7 @@ export class TimeMachine {
         session: turn.session,
         base: turn.base,
         isInterrupted,
+        secrets,
       })
       recorded = await this.log.entry(id)
     }

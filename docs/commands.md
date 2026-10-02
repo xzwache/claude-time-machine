@@ -102,6 +102,16 @@ turned on.
 | `/tm projects`            | Lists every project with a history: size, last activity, and whether its folder still exists. |
 | `/tm projects rm N --yes` | Deletes project N's history.                                                                  |
 
+## Secrets
+
+| Command            | What it does                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `/tm secrets`      | Says whether this project's snapshots keep secrets.                                                           |
+| `/tm secrets skip` | The default: `.env` files, keys and other credentials are never copied, and undo and travel never write them. |
+| `/tm secrets keep` | Keeps them in this project's snapshots, so a change to them can be undone.                                    |
+
+Skipping does not remove copies made while they were kept; `/tm projects rm N --yes` deletes the whole history.
+
 ## `.tmignore`
 
 A `.tmignore` file at the project root, in `.gitignore` syntax, lists paths that are never snapshotted, even when git
@@ -110,7 +120,6 @@ tracks them. Useful for large data folders or files you don't want copied:
 ```
 data/
 *.sqlite
-.env
 ```
 
 ## Browsing with git

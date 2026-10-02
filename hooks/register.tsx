@@ -209,6 +209,13 @@ function hostOf($: EngineInterface): Host {
     },
     setRetention: async days => $.store.set(`retain:${await digest(await $.session.root())}`, days),
     showHeat: (read, from, metric) => showHeat($, read, from, metric),
+    isKeepingSecrets: async () => (await $.store.get(`secrets:${await digest(await $.session.root())}`)) === 'keep',
+    setKeepingSecrets: async isKeeping => {
+      const key = `secrets:${await digest(await $.session.root())}`
+      if (isKeeping) await $.store.set(key, 'keep')
+      else await $.store.delete(key)
+      ;(await machine($)).keepSecrets(isKeeping)
+    },
     openFile: path => openFile($, path),
   }
 }
@@ -299,7 +306,9 @@ async function machine($: EngineInterface): Promise<TimeMachine> {
   const root = await $.session.root()
   const known = machines.get(root)
   if (known) return known.use(depsOf($))
-  const made = new TimeMachine(depsOf($), root, `${await historyHome($)}/${await digest(root)}.git`)
+  const id = await digest(root)
+  const isKeeping = (await $.store.get(`secrets:${id}`)) === 'keep'
+  const made = new TimeMachine(depsOf($), root, `${await historyHome($)}/${id}.git`).keepSecrets(isKeeping)
   machines.set(root, made)
   return made
 }

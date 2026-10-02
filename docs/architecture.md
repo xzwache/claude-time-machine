@@ -60,9 +60,16 @@ through symlinked directories, and remove directories they leave empty.
 ## Ignored files
 
 `.gitignore` applies, with two exceptions. Small ignored files (up to 1 MiB) outside ignored directories are
-snapshotted, which covers `.env` and local config; build and editor debris (`*.log`, `*.pyc`, `.DS_Store`) stays out.
-And any file a file tool is about to edit is captured first, even inside an ignored directory. `.tmignore` overrides
-both.
+snapshotted, which covers local config; build and editor debris (`*.log`, `*.pyc`, `.DS_Store`) stays out. And any
+file a file tool is about to edit is captured first, even inside an ignored directory. `.tmignore` overrides both.
+
+## Secrets
+
+Secrets are left out of every snapshot unless the project keeps them (`/tm secrets keep`): the same files the security
+diff calls secrets, written in `.gitignore` syntax into the shadow repository's `info/exclude` ahead of `.tmignore`, and
+dropped from its index if an older snapshot had them. They are never staged, captured or force-added. When one of
+Claude's file tools writes one, the turn records its path (`tm-secret:`), not its content, so the security diff can
+flag it. Undo and travel skip these paths, so an older snapshot that still holds a copy never writes it back.
 
 ## Disk and speed
 

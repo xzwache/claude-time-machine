@@ -23,7 +23,16 @@ import type { FileHeat, Heat } from '../src/heat.ts'
 import { heatPage, pageLibrary } from '../src/heat-page.ts'
 import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
 import type { Deps, ExecResult } from '../src/index.ts'
-import { alertLine, assess, findingLines, kindOfPath, manifestChanges } from '../src/sensitive.ts'
+import {
+  NOT_KEPT,
+  SECRET_EXCLUDES,
+  alertLine,
+  assess,
+  findingLines,
+  isSecretPath,
+  kindOfPath,
+  manifestChanges,
+} from '../src/sensitive.ts'
 import { heatColor, rasterCells, squarify } from '../src/treemap.ts'
 
 const deps: Deps = {
@@ -238,6 +247,7 @@ describe('undoing a turn', () => {
 
 describe('ignored files', () => {
   test('a small ignored file is snapshotted, so a Bash change to it is undone', async () => {
+    tm.keepSecrets(true)
     await put('.env', 'SECRET=old\n')
     const entry = await turn('edit env', () => put('.env', 'SECRET=new\n'))
     assert.ok(entry)
@@ -280,6 +290,86 @@ describe('ignored files', () => {
     await tm.undo(entry.id)
     assert.equal(await read('node_modules/pkg/index.js'), 'v2\n')
     assert.equal(await read('src/user.ts'), 'user\n')
+  })
+})
+
+describe('secrets', () => {
+  const shadowFiles = async () => {
+    const out = await deps.exec(
+      ['git', `--git-dir=${join(store, 'shadow.git')}`, 'log', '--all', '--name-only', '--format='],
+      {},
+    )
+    return new Set(out.stdout.split('\n').filter(Boolean))
+  }
+
+  test('are left out of every snapshot by default, and a Bash change to them is not undone', async () => {
+    await put('.env', 'SECRET=old\n')
+    await put('certs/server.key', 'KEY\n')
+    const entry = await turn('edit env', async () => {
+      await put('.env', 'SECRET=new\n')
+      await put('src/user.ts', 'v2\n')
+    })
+    assert.ok(entry)
+    assert.deepEqual(entry.changes, [{ status: 'modified', path: 'src/user.ts' }])
+    await tm.undo(entry.id)
+    assert.equal(await read('.env'), 'SECRET=new\n')
+    assert.equal(await read('src/user.ts'), 'user\n')
+    const files = await shadowFiles()
+    assert.equal(files.has('.env') || files.has('certs/server.key'), false)
+  })
+
+  test("Claude's file tools writing one are flagged, without keeping it", async () => {
+    await put('.env', 'SECRET=old\n')
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'set the key', SESSION)
+    await write('.env', 'SECRET=new\n')
+    const entry = await tm.finishTurn(id, SESSION, false)
+    assert.ok(entry)
+    assert.deepEqual(entry.secrets, ['.env'])
+    assert.deepEqual(await tm.findings(entry.id), [{ kind: 'secrets', paths: ['.env'], items: [NOT_KEPT] }])
+    assert.equal(await tm.undoSensitive(entry.id), undefined)
+    assert.equal(await read('.env'), 'SECRET=new\n')
+    assert.equal((await shadowFiles()).has('.env'), false)
+  })
+
+  test('kept ones are dropped from new snapshots once skipped, and never written back from old ones', async () => {
+    tm.keepSecrets(true)
+    await put('.env', 'SECRET=old\n')
+    const before = await tm.save('before', SESSION)
+    assert.ok(before)
+    await put('.env', 'SECRET=current\n')
+    await put('src/user.ts', 'later\n')
+    tm.keepSecrets(false)
+    await tm.travel(before.id)
+    assert.equal(await read('.env'), 'SECRET=current\n')
+    assert.equal(await read('src/user.ts'), 'user\n')
+  })
+
+  test('the patterns snapshots leave out name the same files the security diff calls secrets', async () => {
+    const paths = [
+      '.env',
+      'app/.env.local',
+      '.env.example',
+      'a/.npmrc',
+      'k/id_ed25519',
+      'k/id_ed25519.pub',
+      'tls/x.pem',
+      'notes.md',
+      'credentials.json',
+    ]
+    const excludes = join(store, 'secrets.exclude')
+    await writeFile(excludes, `${SECRET_EXCLUDES}\n`)
+    const ignored = await deps.exec(
+      ['git', '-c', `core.excludesFile=${excludes}`, 'check-ignore', '--no-index', '--stdin'],
+      {
+        cwd: root,
+        stdin: paths.join('\n'),
+      },
+    )
+    assert.deepEqual(
+      ignored.stdout.split('\n').filter(Boolean),
+      paths.filter(path => isSecretPath(path)),
+    )
   })
 })
 
@@ -559,6 +649,7 @@ describe('taking snapshots into the project repository', () => {
   })
 
   test('/tm commit skips files the project ignores', async () => {
+    tm.keepSecrets(true)
     const entry = await turn('env and code', async () => {
       await put('.env', 'SECRET=1\n')
       await put('src/user.ts', 'v2\n')

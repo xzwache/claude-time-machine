@@ -74,6 +74,17 @@ describe('the /tm command', () => {
   })
 })
 
+describe('secrets', () => {
+  test('/tm secrets says they are left out, and keep and skip switch it per project', async ($, on) => {
+    fakeHost(on)
+    expect((await $.command.run(typed('secrets'))).text).toMatch(/left out of this project's snapshots/)
+    expect((await $.command.run(typed('secrets keep'))).text).toMatch(/kept in this project's snapshots from now on/)
+    expect((await $.command.run(typed('secrets'))).text).toMatch(/are kept in this project's snapshots/)
+    expect((await $.command.run(typed('secrets skip'))).text).toMatch(/left out of new snapshots/)
+    expect((await $.command.run(typed('secrets'))).text).toMatch(/left out of this project's snapshots/)
+  })
+})
+
 describe('managing histories', () => {
   test('/tm projects lists every project with a history', async ($, on) => {
     fakeHost(on, {

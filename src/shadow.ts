@@ -7,6 +7,7 @@ import type { Repos } from './export.ts'
 import { ATTRIBUTES, GIT_FLAGS, GitError, chunks } from './git.ts'
 import type { Deps, ExecInit, ExecResult } from './git.ts'
 import { message } from './message.ts'
+import { SECRET_EXCLUDES, isSecretPath } from './sensitive.ts'
 import type { Meta } from './message.ts'
 import { LOG_FORMAT, logIds, parseDiffTree, parseDiffTreeStdin, parseLog } from './timeline.ts'
 import type { Raw } from './timeline.ts'
@@ -35,6 +36,7 @@ export class ShadowRepo {
   readonly gitDir: string
   private deps: Deps
   private excludes: string | undefined
+  private isKeepingSecrets = false
 
   constructor(deps: Deps, root: string, gitDir: string) {
     this.deps = deps
@@ -48,6 +50,18 @@ export class ShadowRepo {
 
   get exec(): Deps['exec'] {
     return this.deps.exec
+  }
+
+  /** Whether snapshots keep secrets (.env, keys…); they leave them out by default. */
+  keepSecrets(isKeeping: boolean): void {
+    if (isKeeping === this.isKeepingSecrets) return
+    this.isKeepingSecrets = isKeeping
+    this.excludes = undefined
+  }
+
+  /** A path snapshots leave out as a secret, and restores never write. */
+  isUnkeptSecret(rel: string): boolean {
+    return !this.isKeepingSecrets && isSecretPath(rel)
   }
 
   /** Creates the repository if needed; true when it has no timeline yet. */
@@ -83,8 +97,9 @@ export class ShadowRepo {
     await this.dropExcluded()
   }
 
-  /** Brings one path of the index up to the work tree, ignored or not. */
+  /** Brings one path of the index up to the work tree, ignored or not; never an unkept secret. */
   async stage(rel: string, isForced: boolean): Promise<void> {
+    if (this.isUnkeptSecret(rel)) return
     await this.git(['add', isForced ? '-f' : '-A', '--', rel], { isLenient: !isForced })
   }
 
@@ -254,7 +269,9 @@ export class ShadowRepo {
       ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory', '--no-empty-directory'],
       { trim: false, isLenient: true, env: { GIT_LITERAL_PATHSPECS: '0' } },
     )
-    const files = listed.split('\0').filter(path => path !== '' && !path.endsWith('/') && !IGNORED_JUNK.test(path))
+    const files = listed
+      .split('\0')
+      .filter(path => path !== '' && !path.endsWith('/') && !IGNORED_JUNK.test(path) && !this.isUnkeptSecret(path))
     for (const chunk of chunks(files)) {
       const small = await this.run(
         ['find', ...chunk.map(path => `./${path}`), '-prune', '-type', 'f', '-size', IGNORED_FILE_LIMIT, '-print0'],
@@ -270,17 +287,19 @@ export class ShadowRepo {
 
   /**
    * `.tmignore` at the project root, in .gitignore syntax, lists paths never
-   * snapshotted. It becomes info/exclude, so `git add -A` does not walk them.
+   * snapshotted; so do secrets, unless kept. Both become info/exclude, so
+   * `git add -A` does not walk them.
    */
   private async syncExcludes(): Promise<void> {
     const read = await this.run(['cat', '--', `${this.root}/${TMIGNORE}`], {})
-    const text = read.exitCode === 0 ? read.stdout : ''
+    const tmignore = read.exitCode === 0 ? read.stdout : ''
+    const text = this.isKeepingSecrets ? tmignore : `${SECRET_EXCLUDES}\n${tmignore}`
     if (text === this.excludes) return
     await this.deps.writeFile(`${this.gitDir}/info/exclude`, text)
     this.excludes = text
   }
 
-  /** Drops what `.tmignore` names from the index, force-added files included. */
+  /** Drops what info/exclude names from the index, force-added files included. */
   private async dropExcluded(): Promise<void> {
     if (!this.excludes) return
     const args = ['ls-files', '-z', '--cached', '--ignored', `--exclude-from=${this.gitDir}/info/exclude`]

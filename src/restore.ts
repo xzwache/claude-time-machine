@@ -23,7 +23,8 @@ export type RestoreReport = {
  * Reverts what `entry` changed and leaves everything else as it is now. For
  * a turn, that is what Claude's steps changed; `only` narrows it to those
  * paths. A file changed again since is a conflict and stays as it is, unless
- * `isForced`.
+ * `isForced`. A secret snapshots leave out is never written, even from an
+ * older snapshot that still holds it.
  */
 export async function undo(
   shadow: ShadowRepo,
@@ -33,7 +34,7 @@ export async function undo(
   only?: ReadonlySet<string>,
 ): Promise<RestoreReport> {
   if (!entry.parent) throw new Error('The baseline has nothing before it to go back to')
-  const all = await history.plan(entry)
+  const all = (await history.plan(entry)).filter(plan => !shadow.isUnkeptSecret(plan.path))
   const plans = only === undefined ? all : all.filter(plan => only.has(plan.path))
   const current = await recordCurrent(shadow)
   const changedSince = await changedAgainst(shadow, plans, plan => plan.after, current.tree)
@@ -54,10 +55,10 @@ export async function undo(
   }
 }
 
-/** Puts every tracked file back to how it was at `entry`. */
+/** Puts every tracked file back to how it was at `entry`; never a secret snapshots leave out. */
 export async function travel(shadow: ShadowRepo, history: History, entry: Entry): Promise<RestoreReport> {
   const current = await recordCurrent(shadow)
-  const changes = await shadow.diffTrees(current.tree, entry.id)
+  const changes = (await shadow.diffTrees(current.tree, entry.id)).filter(change => !shadow.isUnkeptSecret(change.path))
   // From now to the target: a path the target lacks is removed.
   await applyPlans(
     shadow,

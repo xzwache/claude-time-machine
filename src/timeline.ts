@@ -197,6 +197,7 @@ function toEntry(raw: Raw): Entry {
     base: raw.meta.base ?? null,
     target: raw.meta.target ?? null,
     isInterrupted: raw.meta.isInterrupted === true,
+    secrets: raw.meta.secrets ?? [],
     changes: raw.changes,
     counts: countsOf(raw.changes),
     steps: [],

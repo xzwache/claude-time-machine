@@ -42,6 +42,8 @@ export type Host = {
   showHeat: (heat: Heat, from: number | null, metric: HeatMetric) => Promise<boolean>
   /** Opens a local file with the system's default app; false when it could not. */
   openFile: (path: string) => Promise<boolean>
+  isKeepingSecrets: () => Promise<boolean>
+  setKeepingSecrets: (isKeeping: boolean) => Promise<void>
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -61,6 +63,7 @@ export const HELP = [
   '  commit [N] [message] [--force]  commit what turn N changed to your current branch',
   '  branch N name             a new branch in your repo holding snapshot N',
   '  patch [N]                 turn N as a patch file (also copied to the clipboard)',
+  '  secrets [keep | skip]     keep .env files and keys in snapshots, or leave them out (the default)',
   '  retain 30d | off          prune snapshots older than that, once a day',
   '  prune 30d | prune 50      forget old snapshots (by age, or keep the newest N)',
   '  heat [30d] [rework|undo|owner]  where Claude worked: a map of the project, hottest files',
@@ -95,6 +98,8 @@ export async function runCommand(host: Host, args: string): Promise<string> {
         return 'Time machine manual: snapshots only on /tm save.'
       case 'projects':
         return await projectsCommand(host, await host.machine(), rest, flags)
+      case 'secrets':
+        return await secretsCommand(host, arg)
       case 'help':
         return HELP
     }
@@ -240,6 +245,20 @@ export async function writeHeatPage(host: Host, tm: TimeMachine, heat: Heat): Pr
   })
   await host.writeFile(path, page)
   return path
+}
+
+async function secretsCommand(host: Host, arg: string | undefined): Promise<string> {
+  if (arg === 'keep') {
+    await host.setKeepingSecrets(true)
+    return "Secrets (.env files, keys, .npmrc…) are kept in this project's snapshots from now on, on this machine only, so a change to them can be undone. /tm secrets skip stops."
+  }
+  if (arg === 'skip') {
+    await host.setKeepingSecrets(false)
+    return 'Secrets are left out of new snapshots, and undo and travel never write them. Snapshots taken while they were kept still hold copies; /tm projects rm N --yes deletes the whole history.'
+  }
+  return (await host.isKeepingSecrets())
+    ? "Secrets (.env files, keys, .npmrc…) are kept in this project's snapshots. /tm secrets skip leaves them out."
+    : "Secrets (.env files, keys, .npmrc…) are left out of this project's snapshots: a change to them is flagged, not undoable. /tm secrets keep keeps them."
 }
 
 async function retainCommand(host: Host, tm: TimeMachine, arg: string | undefined): Promise<string> {

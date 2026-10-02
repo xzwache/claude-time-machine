@@ -108,8 +108,12 @@ Details, numbers and trade-offs: [docs/architecture.md](docs/architecture.md).
 
 ## Privacy
 
-Everything stays on your machine. Snapshots contain your project's files, including small ignored files like `.env`,
-plus your prompts and Claude's answers. The folder is created with mode `700`.
+Everything stays on your machine. Snapshots contain your project's files, including small ignored files such as local
+config, plus your prompts and Claude's answers. The folder is created with mode `700`.
+
+Secrets are left out: `.env` files, keys and certificates, `.npmrc`, `.pypirc`, `.netrc`, credentials and kubeconfigs
+are never copied, and undo and travel never write them. When Claude edits one, the security diff says so, but it cannot
+be undone. To keep them in a project's snapshots anyway, so they can be undone: `/tm secrets keep`.
 
 To keep paths out, list them in a `.tmignore` file (same syntax as `.gitignore`). To delete a project's history:
 `/tm projects rm N --yes`, or remove its folder under `~/.claude/time-machine/`.

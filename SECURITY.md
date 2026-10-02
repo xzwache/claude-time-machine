@@ -1,8 +1,10 @@
 # Security policy
 
-The time machine copies project files, including small ignored files such as `.env`, into a git repository under
-`~/.claude/time-machine/`. It never sends anything over the network. Bugs that could leak those files, write outside
-the project, or overwrite work without a way back are treated as security issues.
+The time machine copies project files, including small ignored files such as local config, into a git repository under
+`~/.claude/time-machine/`. It never sends anything over the network. Secrets (`.env` files, keys and certificates,
+`.npmrc` and other credentials) are left out unless a project opts in with `/tm secrets keep`. Bugs that could leak
+those files, copy a secret that should have been left out, write outside the project, or overwrite work without a way
+back are treated as security issues.
 
 ## Reporting
 
