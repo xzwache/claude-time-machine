@@ -23,6 +23,8 @@ import type { FileHeat, Heat } from '../src/heat.ts'
 import { heatPage, pageLibrary } from '../src/heat-page.ts'
 import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
 import type { Deps, ExecResult } from '../src/index.ts'
+import { restoreText, turnSummary } from '../src/format.ts'
+import { versionProblem } from '../src/version.ts'
 import {
   NOT_KEPT,
   SECRET_EXCLUDES,
@@ -1005,5 +1007,51 @@ describe('the security diff', () => {
     assert.deepEqual(await tm.findings(entry.id), [])
     assert.equal(await tm.undoSensitive(entry.id), undefined)
     assert.equal(await read('src/user.ts'), 'plain\n')
+  })
+})
+
+describe('the Claude Code version', () => {
+  test('2.1.287 and newer pass; older, or too old to say, get told to update', () => {
+    assert.equal(versionProblem('2.1.287'), undefined)
+    assert.equal(versionProblem('2.1.300-dev'), undefined)
+    assert.equal(versionProblem('2.2.0'), undefined)
+    assert.equal(versionProblem('3.0.1'), undefined)
+    assert.equal(versionProblem('custom-build'), undefined)
+    assert.match(versionProblem('2.1.286') ?? '', /needs Claude Code 2\.1\.287 or newer; this is 2\.1\.286/)
+    assert.match(versionProblem('1.9.999') ?? '', /this is 1\.9\.999/)
+    assert.match(
+      versionProblem(undefined) ?? '',
+      /needs Claude Code 2\.1\.287 or newer\. Update it with: claude update/,
+    )
+  })
+})
+
+describe('the band', () => {
+  const summary = (modified: number, added: number, deleted: number) =>
+    turnSummary({ counts: { added, modified, deleted } } as Parameters<typeof turnSummary>[0])
+
+  test('says what a turn did in a sentence', () => {
+    assert.equal(summary(3, 12, 4), 'Claude edited 3 files, created 12 and deleted 4')
+    assert.equal(summary(2, 0, 1), 'Claude edited 2 files and deleted 1')
+    assert.equal(summary(0, 1, 0), 'Claude created 1 file')
+    assert.equal(summary(0, 0, 5), 'Claude deleted 5 files')
+    assert.equal(summary(1, 2, 0), 'Claude edited 1 file and created 2')
+    assert.equal(summary(0, 0, 0), 'Claude changed only files the time machine leaves out')
+  })
+
+  test('says what an undo did in a sentence', () => {
+    const files = (count: number) => Array.from({ length: count }, (_, i) => `f${i}`)
+    const report = (restored: number, removed: number, recovered: number, unchanged = 0) => ({
+      restored: files(restored),
+      removed: files(removed),
+      recovered: files(recovered),
+      unchanged: files(unchanged),
+      conflicts: [],
+      entry: undefined,
+    })
+    assert.equal(restoreText(report(3, 12, 4), 'abc1234'), '✓ Restored 3 files, removed 12 and brought back 4')
+    assert.equal(restoreText(report(0, 2, 1), 'abc1234'), '✓ Removed 2 files and brought back 1')
+    assert.equal(restoreText(report(1, 0, 0, 2), 'abc1234'), '✓ Restored 1 file\n· 2 files were already back')
+    assert.equal(restoreText(report(0, 0, 0), 'abc1234'), 'Nothing to change: the files are already there.')
   })
 })

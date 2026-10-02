@@ -37,8 +37,15 @@ function typed(args: string) {
 }
 
 /** Answers every command with success and `answers[argv]` or nothing; records the calls. */
-function fakeHost(on: On, given: Record<string, string> = {}, isGit = true, root = '/work/project'): string[][] {
+function fakeHost(
+  on: On,
+  given: Record<string, string> = {},
+  isGit = true,
+  root = '/work/project',
+  version = '2.1.287',
+): string[][] {
   const calls: string[][] = []
+  on('session.version', () => ({ value: { version, base: version, builtAt: '2026-10-01T00:00:00Z' } }))
   const answers: Record<string, string> = { '--is-inside-work-tree': isGit ? 'true\n' : '', ...given }
   on('fs.exists', () => ({ value: false }))
   mock.env(on, { HOME: '/home/tester' })
@@ -56,6 +63,16 @@ function fakeHost(on: On, given: Record<string, string> = {}, isGit = true, root
   })
   return calls
 }
+
+describe('an older Claude Code', () => {
+  test('gets a clear message instead of a half-working time machine', async ($, on) => {
+    const calls = fakeHost(on, {}, true, '/work/project', '2.1.250')
+    expect((await $.command.run(typed('log'))).text).toBe(
+      'Time machine needs Claude Code 2.1.287 or newer; this is 2.1.250. Update it with: claude update',
+    )
+    expect(calls.some(argv => argv.includes('init'))).toBe(false)
+  })
+})
 
 describe('the /tm command', () => {
   test('keeps the shadow repository under ~/.claude/time-machine, never in the project', async ($, on) => {
@@ -213,9 +230,10 @@ describe('the security diff in the band', () => {
 
   test('shows what was flagged and a button to undo only that, on every surface', async ($, on) => {
     fakeHost(on)
-    withBand(on, { id: ID, summary: '2 modified', alert: 'CI config · deps +left-pad', result: null })
+    withBand(on, { id: ID, summary: 'Claude edited 2 files', alert: 'CI config · deps +left-pad', result: null })
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ plugin: 'time-machine', component: 'AbovePrompt', surface, props: PROPS })
+      expect(await ui.find({ type: 'Text', text: '⏱ Claude edited 2 files' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: '⚠ CI config · deps +left-pad' })).toBeDefined()
       expect(await ui.find({ key: 'tm-undo-sensitive' })).toBeDefined()
       expect(await ui.find({ key: 'tm-undo' })).toBeDefined()
@@ -225,7 +243,7 @@ describe('the security diff in the band', () => {
 
   test('keeps to one row when nothing was flagged', async ($, on) => {
     fakeHost(on)
-    withBand(on, { id: ID, summary: '2 modified', alert: null, result: null })
+    withBand(on, { id: ID, summary: 'Claude edited 2 files', alert: null, result: null })
     const ui = await $.ui.mount({ plugin: 'time-machine', component: 'AbovePrompt', surface: 'terminal', props: PROPS })
     expect(await ui.find({ key: 'tm-undo' })).toBeDefined()
     expect(await ui.find({ key: 'tm-undo-sensitive' })).toBeUndefined()

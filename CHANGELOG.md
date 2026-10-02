@@ -6,6 +6,17 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+### Added
+
+- On a Claude Code older than 2.1.287, the time machine says so and stays off instead of half working.
+- README: how it compares with committing often, bashward and sandboxes, and how to uninstall it.
+
+### Changed
+
+- The band says what a turn did in a sentence: "Claude edited 3 files, created 12 and deleted 4" instead of
+  "Claude changed 3 modified · 12 created · 4 deleted".
+- Undo, redo and travel say what they did the same way: "Restored 3 files, removed 12 and brought back 4".
+
 ### Changed
 
 - The pane's **Travel to after** is now **Travel here** and comes first; it also works on the baseline and checkpoints.

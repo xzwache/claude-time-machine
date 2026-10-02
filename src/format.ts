@@ -45,10 +45,24 @@ export function countsShort(entry: Entry): string {
   return [added && `+${added}`, modified && `~${modified}`, deleted && `-${deleted}`].filter(Boolean).join(' ')
 }
 
-export function countsText(entry: Entry): string {
+/** `Claude edited 3 files, created 12 and deleted 4`: what a turn did, as the band says it. */
+export function turnSummary(entry: Entry): string {
   const { added, modified, deleted } = entry.counts
-  const parts = [modified && `${modified} modified`, added && `${added} created`, deleted && `${deleted} deleted`]
-  return parts.filter(Boolean).join(' · ') || 'no files'
+  const done = actions([
+    ['edited', modified],
+    ['created', added],
+    ['deleted', deleted],
+  ])
+  return done === undefined ? 'Claude changed only files the time machine leaves out' : `Claude ${done}`
+}
+
+/** `edited 3 files, created 12 and deleted 4`: the counts above zero, the first naming files; undefined when none is. */
+function actions(counts: readonly (readonly [verb: string, count: number])[]): string | undefined {
+  const [first, ...rest] = counts.filter(([, count]) => count > 0)
+  if (first === undefined) return undefined
+  const parts = [`${first[0]} ${plural(first[1], 'file')}`, ...rest.map(([verb, count]) => `${verb} ${count}`)]
+  const last = parts.pop()
+  return parts.length > 0 ? `${parts.join(', ')} and ${last}` : last
 }
 
 export function statusMark(change: Change): string {
@@ -75,10 +89,17 @@ export function projectLine(project: Project, i: number, isCurrent: boolean): st
 
 export function restoreText(done: RestoreReport, id: string): string {
   const lines: string[] = []
-  if (done.restored.length) lines.push(`✓ Restored ${plural(done.restored.length, 'modified file')}`)
-  if (done.removed.length) lines.push(`✓ Removed ${plural(done.removed.length, 'file')}`)
-  if (done.recovered.length) lines.push(`✓ Brought back ${plural(done.recovered.length, 'file')}`)
-  if (done.unchanged.length) lines.push(`· ${plural(done.unchanged.length, 'file')} already back as they were`)
+  const did = actions([
+    ['restored', done.restored.length],
+    ['removed', done.removed.length],
+    ['brought back', done.recovered.length],
+  ])
+  if (did !== undefined) lines.push(`✓ ${did.charAt(0).toUpperCase()}${did.slice(1)}`)
+  if (done.unchanged.length) {
+    lines.push(
+      `· ${plural(done.unchanged.length, 'file')} ${done.unchanged.length === 1 ? 'was' : 'were'} already back`,
+    )
+  }
   if (done.conflicts.length) {
     lines.push(`⚠ Left alone, changed by someone else since: ${done.conflicts.join(', ')}`)
     lines.push(`  /tm undo ${id.slice(0, 7)} --force overwrites them (still undoable).`)
