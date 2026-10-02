@@ -1,0 +1,11 @@
+{
+  "name": "time-machine",
+  "version": "0.1.0",
+  "description": "Every Claude turn becomes a snapshot: review what changed, undo it, or travel back. Local, zero tokens.",
+  "author": {
+    "name": "xzwache"
+  },
+  "repository": "https://github.com/xzwache/claude-time-machine",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
