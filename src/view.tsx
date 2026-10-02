@@ -198,14 +198,15 @@ export function heatView(
       <Text dimColor>{clip(legend, columns)}</Text>
       <Box flexDirection="column" marginTop={1}>
         {nodes.slice(0, LISTED).map((node, i) => {
-          const shown = valueLabel(node, metric)
+          // Churn is the first number of `describe` already.
+          const shown = metric === 'churn' ? '' : `${valueLabel(node, metric)}  ·`
           const label = `${node.isDir ? '▸' : ' '} ${node.name}${node.isDir ? '/' : ''}`
           return (
             <Box key={`n-${i}`} flexDirection="row" gap={1}>
               <Text color={hex(heatColor(intensity(node, metric, max), metric))}>██</Text>
               <Button
                 plain
-                label={clip(`${label}  ${shown}  · ${describe(node)}`, Math.max(10, columns - 4))}
+                label={clip(`${label}  ${shown} ${describe(node)}`, Math.max(10, columns - 4))}
                 onPress={() => on.enter(node)}
               />
             </Box>

@@ -423,7 +423,9 @@ function escapeXml(text: string): string {
 
 /** `412 lines by Claude in 9 edits · 3 reworked · 1 undo · 20 by you` */
 export function describe(node: HeatNode): string {
-  const parts = [`${node.claude} lines by Claude in ${node.edits} ${node.edits === 1 ? 'edit' : 'edits'}`]
+  const parts = [
+    `${node.claude} ${node.claude === 1 ? 'line' : 'lines'} by Claude in ${node.edits} ${node.edits === 1 ? 'edit' : 'edits'}`,
+  ]
   if (node.rework > 0) parts.push(`${node.rework} reworked`)
   if (node.undos > 0) parts.push(`${node.undos} ${node.undos === 1 ? 'undo' : 'undos'}`)
   if (node.human > 0) parts.push(`${node.human} by you`)

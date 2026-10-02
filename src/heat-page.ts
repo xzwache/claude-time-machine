@@ -127,7 +127,7 @@ function nodeAt(p) {
   return n;
 }
 function describe(n) {
-  const parts = [n.claude + ' lines by Claude in ' + n.edits + (n.edits === 1 ? ' edit' : ' edits')];
+  const parts = [n.claude + (n.claude === 1 ? ' line' : ' lines') + ' by Claude in ' + n.edits + (n.edits === 1 ? ' edit' : ' edits')];
   if (n.rework) parts.push(n.rework + ' reworked');
   if (n.undos) parts.push(n.undos + (n.undos === 1 ? ' undo' : ' undos'));
   if (n.human) parts.push(n.human + ' by you');
