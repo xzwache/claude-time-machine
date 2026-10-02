@@ -5,9 +5,13 @@
  * What a snapshot records: the first snapshot (`baseline`), changes nobody's
  * tool call made (`outside`), one tool call of Claude's (`step`), the marker
  * that closes a turn (`turn`), an ignored file's content before Claude's
- * first edit (`capture`), and the time machine's own `undo` and `travel`.
+ * first edit (`capture`), a snapshot saved by name (`checkpoint`), and the
+ * time machine's own `undo` and `travel`.
  */
-export type EntryKind = 'baseline' | 'outside' | 'turn' | 'step' | 'capture' | 'undo' | 'travel'
+export type EntryKind = 'baseline' | 'outside' | 'turn' | 'step' | 'capture' | 'checkpoint' | 'undo' | 'travel'
+
+/** When snapshots are taken: around every turn, only on /tm save, or never. */
+export type Mode = 'auto' | 'manual' | 'off'
 
 export type Counts = { added: number; modified: number; deleted: number }
 

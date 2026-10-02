@@ -45,6 +45,25 @@ Answer:
   transcript row like any slash command's output. The pane and the band write no transcript
   rows.
 
+## How it differs from `/rewind`
+
+Claude Code's built-in [`/rewind`](https://code.claude.com/docs/en/checkpointing.md) restores
+code and conversation to the start of a turn. It covers file edits made through Write and Edit,
+keeps the last 100 checkpoints per session for about 30 days, and can also rewind the
+conversation. If that is all you need, you may not need this mod. The time machine is for what
+`/rewind` leaves out:
+
+| | `/rewind` | Time machine |
+| --- | --- | --- |
+| Changes made through Bash (`rm`, `mv`, codegen, formatters) | not tracked | tracked as steps |
+| Undo one step of a turn | no | yes |
+| Your edits during a turn | overwritten | kept, or flagged as a conflict |
+| Several sessions in one project | per session | one timeline, each session's steps kept apart |
+| History | 100 checkpoints, about 30 days | until you prune it; browsable with plain git |
+| Rewind the conversation | yes | no (the mod API cannot) |
+
+The two work side by side.
+
 ## Install
 
 You need macOS or Linux, Claude Code with function-hook plugins (developed against 2.1.287), and
@@ -77,11 +96,25 @@ timeline.
 | `/tm show N` | Shows the files, steps and answer of snapshot N. `N` is a number from `/tm log`, or a commit id. |
 | `/tm undo [N\|N.k] [--force]` | Reverts turn N, or its step k, and leaves everything else alone. With no argument, reverts the latest turn. |
 | `/tm redo` | Undoes the latest undo. |
-| `/tm travel N` | Puts every tracked file back to how it was at snapshot N. |
+| `/tm travel N\|name` | Puts every tracked file back to how it was at snapshot N, or at a saved checkpoint. |
+| `/tm save [name]` | Saves the work tree now as a named checkpoint, even if nothing changed. |
+| `/tm on`, `/tm off`, `/tm manual` | Sets this project's mode. `on` snapshots every turn (the default), `off` takes no snapshots, and `manual` snapshots only on `/tm save`. The mode is kept across sessions, and the history stays in every mode. |
 | `/tm prune 30d` or `/tm prune 50` | Forgets snapshots older than 30 days, or keeps only the newest 50. The oldest kept state becomes the new baseline. |
-| `/tm stats` | Shows the snapshot count and disk use for this project. |
+| `/tm stats` | Shows the snapshot count, disk use and mode for this project. |
 | `/tm projects [rm N --yes]` | Lists every project that has a history, with its size, last activity and whether its folder still exists. `rm N --yes` deletes project N's history. |
 | `/tm git` | Prints the `git` command for browsing the timeline yourself. |
+
+### Keep paths out: `.tmignore`
+
+A `.tmignore` file at the project root, in `.gitignore` syntax, lists paths the time machine
+never snapshots, even when Git tracks them. Use it for large data folders or anything you do
+not want copied:
+
+```
+data/
+*.sqlite
+.env
+```
 
 ### Look at it with plain Git
 
@@ -100,7 +133,8 @@ tmgit diff 303149e 19a9e6f    # any two points in time
 session.start     →  create the shadow repo if missing; snapshot the work tree as "Baseline"
 turn.start        →  snapshot; anything new since the last snapshot is recorded as "you"
 Write/Edit        →  before: re-add that one file (catches your edits to it) · after: commit a step
-Bash              →  before: full snapshot ("you" if changed) · after: full snapshot, commit a step
+Bash              →  read-only command (ls, cat, grep, git status…): nothing
+                     otherwise before: full snapshot ("you" if changed) · after: full snapshot, commit a step
 turn.complete     →  full snapshot (leftovers are "not Claude"), then a turn marker naming its base
 /tm undo <turn>   →  for each path Claude's steps touched:
                        changed by anyone else since       → conflict, left alone (unless --force)
@@ -117,6 +151,11 @@ turn.complete     →  full snapshot (leftovers are "not Claude"), then a turn m
   `git write-tree`. Git rehashes only files whose stat data changed, and the untracked cache and
   index v4 are on. On a 50,000-file project the first snapshot took 4.3 s and later ones took
   50–90 ms. A step that changes nothing costs only that snapshot.
+- **Read-only commands are skipped.** A Bash command whose every part is a read-only program
+  takes no snapshots. Examples: `ls`, `cat`, `grep`, `rg`, `find` without `-delete` or `-exec`,
+  `sed` without `-i`, and `git status`/`log`/`diff`. A command with `>`, `$(…)` or `tee` never
+  counts as read-only. If a command is wrongly judged read-only, nothing is lost: the next
+  snapshot records its changes, attributed to the next step or to "not Claude".
 - **Disk.** Every snapshot first stores new objects loose. After a turn, `git gc --auto` packs
   them once there are more than about 1,000. In the same test, packing shrank the shadow
   repository from 207 MB to 9 MB. `/tm prune` rewrites history and runs a full gc.
@@ -130,8 +169,21 @@ turn.complete     →  full snapshot (leftovers are "not Claude"), then a turn m
     This covers `.env` and local configs. Build and editor debris (`*.log`, `*.pyc`, `.DS_Store`)
     stays out.
   - Any file a file tool edits is captured before the edit, even inside an ignored directory.
-- **Code layout.** `hooks/core.ts` has all the Git logic and no Claude Code API, and is tested
-  against real Git. `hooks/register.tsx` has the hooks, the band, the pane and `/tm`.
+- **Code layout.** Only `hooks/register.tsx` touches the Claude Code API: the hooks, the state,
+  and the handlers. The rest is plain TypeScript, tested under Node:
+
+  | File | Role |
+  | --- | --- |
+  | `core.ts` | The `TimeMachine`: snapshots, undo, travel, save and prune |
+  | `timeline.ts` | Reading commits and folding them into turns |
+  | `message.ts` | The commit message format |
+  | `git.ts` | Pinned git settings |
+  | `projects.ts` | `/tm projects` |
+  | `bash.ts` | The read-only command check |
+  | `commands.ts` | `/tm` |
+  | `view.tsx` | The band and the pane |
+  | `format.ts` | Shared text |
+
   `types/index.d.ts` is the state contract.
 
 ## Limitations
@@ -142,8 +194,8 @@ turn.complete     →  full snapshot (leftovers are "not Claude"), then a turn m
   window, edits are attributed correctly.
 - **Files written by MCP tools or background processes** show up as "not Claude", because no
   tool call is linked to them. Undoing the turn leaves them, but you can undo them individually.
-- **Large repositories** pay two full snapshots per Bash call. Expect around 0.1 s each at
-  50,000 files, and more without an SSD. If the snapshot before a turn takes more than 2 s, a
+- **Large repositories** pay two full snapshots per Bash call that is not read-only. Expect
+  around 0.1 s each at 50,000 files, and more without an SSD. If the snapshot before a turn takes more than 2 s, a
   toast says so.
 - **Empty directories** are not tracked, because Git does not track them.
 - **Files outside the project root** are not tracked.
@@ -152,7 +204,8 @@ turn.complete     →  full snapshot (leftovers are "not Claude"), then a turn m
   "folder gone" in `/tm projects`.
 - **A restore that fails partway** (a locked file, say) can leave some paths restored. The state
   from just before is on the timeline, so `/tm travel` to it recovers.
-- **Claude Code's `/rewind`** is not linked. The mod API has no way to read or drive it.
+- **Claude Code's `/rewind`** is not linked. The mod API has no way to read or drive it, so
+  rewinding the conversation stays with `/rewind`.
 - **Windows** is not supported. The mod uses `test`, `find`, `du` and POSIX paths.
 
 ## Privacy and data
@@ -174,7 +227,7 @@ delete all of it, run `rm -rf ~/.claude/time-machine`.
 ## Develop
 
 ```sh
-npm test            # tests/core.spec.ts: real git in temp dirs (Node 22.18+)
+npm test            # tests/*.spec.ts: real git in temp dirs, the read-only check (Node 22.18+)
 npm run test:mod    # tests/plugin.test.tsx: the mod inside Claude Code's test engine
 npm run validate    # claude plugin validate .
 npm run typecheck   # tsc; needs .claude-plugin/types, which Claude Code lays on first load

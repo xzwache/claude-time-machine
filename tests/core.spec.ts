@@ -425,3 +425,84 @@ describe('history and travel', () => {
     assert.ok(await tm.finishTurn('main', SESSION, false))
   })
 })
+
+describe('fixes found in review', () => {
+  test('an old turn beyond the first read window is undone whole', async () => {
+    tm = new TimeMachine(deps, root, join(store, 'small-window.git'), 4)
+    await tm.init()
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'long turn', SESSION)
+    for (let i = 0; i < 6; i++) await write(`src/f${i}.ts`, `${i}\n`)
+    const long = await tm.finishTurn(id, SESSION, false)
+    for (let i = 0; i < 6; i++) await turn(`later ${i}`, () => put('src/user.ts', `later ${i}\n`))
+    assert.ok(long)
+    const found = (await tm.history(50)).find(entry => entry.title === 'long turn')
+    assert.equal(found?.steps.length, 6)
+    const report = await tm.undo(long.id)
+    assert.equal(report.removed.length, 6)
+    for (let i = 0; i < 6; i++) assert.equal(await exists(`src/f${i}.ts`), false)
+  })
+
+  test('prune keeps the start of a turn that began before a newer one ended', async () => {
+    await turn('old', () => put('src/legacy.ts', 'old\n'))
+    await tm.beginTurn('slow', 'slow turn', 'session-b')
+    await turn('quick', () => put('src/user.ts', 'quick\n'), 'session-a')
+    await write('src/auth.ts', 'slow\n', 'session-b')
+    const slow = await tm.finishTurn('slow', 'session-b', false)
+    assert.ok(slow)
+    await tm.prune({ keepLast: 2 })
+    const history = await tm.history()
+    const kept = history.find(entry => entry.title === 'slow turn')
+    assert.ok(kept)
+    assert.deepEqual(kept.changes, [{ status: 'modified', path: 'src/auth.ts' }])
+    await tm.undo(kept.id)
+    assert.equal(await read('src/auth.ts'), 'A\n')
+  })
+
+  test('undo, redo, then undoing the redo is an undo again', async () => {
+    const entry = await turn('edit', () => put('src/user.ts', 'claude\n'))
+    assert.ok(entry)
+    const undo = await tm.undo(entry.id)
+    assert.equal(undo.entry?.title, 'Undo: edit')
+    const redo = await tm.undo(undo.entry?.id ?? '')
+    assert.equal(redo.entry?.title, 'Redo: edit')
+    const again = await tm.undo(redo.entry?.id ?? '')
+    assert.equal(again.entry?.title, 'Undo: edit')
+    assert.equal(await read('src/user.ts'), 'user\n')
+  })
+})
+
+describe('checkpoints and .tmignore', () => {
+  test('a saved checkpoint is found by name and travelled to', async () => {
+    await put('src/user.ts', 'before refactor\n')
+    const saved = await tm.save('before refactor', SESSION)
+    assert.equal(saved?.kind, 'checkpoint')
+    await turn('refactor', () => put('src/user.ts', 'after\n'))
+    const found = await tm.findCheckpoint('Before Refactor')
+    assert.equal(found?.id, saved?.id)
+    await tm.travel(found?.id ?? '')
+    assert.equal(await read('src/user.ts'), 'before refactor\n')
+  })
+
+  test('saving twice with nothing changed still makes two bookmarks', async () => {
+    const first = await tm.save('one', null)
+    const second = await tm.save('two', null)
+    assert.ok(first && second && first.id !== second.id)
+  })
+
+  test('.tmignore keeps paths out of snapshots, small ignored files included', async () => {
+    await put('.tmignore', 'data/\n.env\n')
+    await put('.env', 'SECRET=1\n')
+    const entry = await turn('touch', async () => {
+      await put('data/big.csv', 'a,b\n')
+      await put('.env', 'SECRET=2\n')
+      await put('src/user.ts', 'changed\n')
+    })
+    assert.ok(entry)
+    assert.deepEqual(entry.changes, [{ status: 'modified', path: 'src/user.ts' }])
+    await tm.undo(entry.id)
+    assert.equal(await read('.env'), 'SECRET=2\n')
+    assert.equal(await read('data/big.csv'), 'a,b\n')
+  })
+})
+

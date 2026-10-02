@@ -1,0 +1,180 @@
+// `/tm` and its subcommands. What they need from the session comes in as a
+// Host of plain functions, which register.tsx builds.
+
+import type { Exec, TimeMachine } from './core.ts'
+import { deleteProject, listProjects } from './core.ts'
+import { clip, countsShort, kindLabel, logText, oneLine, plural, projectLine, restoreText, size, statusMark, stepLabel } from './format.ts'
+import type { Entry, Mode } from '../types'
+
+export type Host = {
+  machine: () => Promise<TimeMachine>
+  refresh: (tm: TimeMachine) => Promise<Entry[]>
+  session: () => Promise<string>
+  mode: () => Promise<Mode>
+  setMode: (mode: Mode) => Promise<void>
+  openPane: () => Promise<boolean>
+  home: () => Promise<string>
+  exec: Exec
+  forget: (root: string) => void
+  report: (error: unknown) => string
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export const HELP = [
+  'Usage: /tm [command]',
+  '  (none)                    open the Time machine pane',
+  '  log [N] [--session]       list snapshots, newest first',
+  '  show N                    files, steps and answer of snapshot N',
+  '  undo [N|N.k] [--force]    revert a turn (default: the latest) or one of its steps',
+  '  redo                      undo the latest undo',
+  '  travel N|name             put every file back to snapshot N or a saved checkpoint',
+  '  save [name]               save the work tree now as a named checkpoint',
+  '  on | off | manual         snapshot every turn, never, or only on /tm save',
+  '  prune 30d | prune 50      forget old snapshots (by age, or keep the newest N)',
+  '  stats                     snapshots, disk use and mode for this project',
+  '  projects [rm N --yes]     every project with a history; delete one',
+  '  git                       the git command to browse the timeline yourself',
+].join('\n')
+
+export async function runCommand(host: Host, args: string): Promise<string> {
+  const words = args.trim().split(/\s+/).filter(word => word !== '')
+  const [verb = '', ...rest] = words
+  const flags = new Set(rest.filter(word => word.startsWith('--')))
+  const arg = rest.find(word => !word.startsWith('--'))
+  try {
+    const tm = await host.machine()
+    const list = await host.refresh(tm)
+    switch (verb) {
+      case '':
+      case 'open': {
+        const isPlaced = await host.openPane()
+        return isPlaced ? 'Time machine opened.' : `${logText(list.slice(0, 10))}\n\n(The pane could not open here.)`
+      }
+      case 'log': {
+        const session = await host.session()
+        const shown = flags.has('--session') ? list.filter(one => one.session === session) : list
+        return logText(shown.slice(0, Number(arg) || 15))
+      }
+      case 'show':
+      case 'steps':
+        return await showText(tm, await resolveRef(tm, list, arg), arg ?? '1')
+      case 'undo': {
+        const entry = arg ? await resolveRef(tm, list, arg) : list.find(one => one.kind === 'turn')
+        if (!entry) return 'No Claude turn to undo yet.'
+        const done = await tm.undo(entry.id, flags.has('--force'))
+        return `Undo ${kindLabel(entry)} "${entry.title}":\n${restoreText(done, entry.id)}`
+      }
+      case 'redo': {
+        const last = list[0]
+        if (!last || last.kind !== 'undo' || !last.title.startsWith('Undo: ')) {
+          return 'Nothing to redo: the latest snapshot is not an undo.'
+        }
+        const done = await tm.undo(last.id, flags.has('--force'))
+        return `Redo "${last.title.slice(6)}":\n${restoreText(done, last.id)}`
+      }
+      case 'travel': {
+        if (!arg) return 'Name a snapshot: /tm travel 3, or a checkpoint: /tm travel "before refactor".'
+        const entry = await resolveRef(tm, list, rest.join(' '))
+        return `Travelled to "${entry.title}":\n${restoreText(await tm.travel(entry.id), entry.id)}`
+      }
+      case 'save': {
+        const name = rest.join(' ').replace(/^["']|["']$/g, '')
+        const saved = await tm.save(name, await host.session())
+        await host.refresh(tm)
+        return `Saved checkpoint "${saved?.title ?? name}" (${saved?.id.slice(0, 7) ?? ''}). /tm travel "${saved?.title ?? name}" comes back to it.`
+      }
+      case 'on':
+      case 'auto':
+        await host.setMode('auto')
+        await host.refresh(tm)
+        return 'Time machine on: every turn is snapshotted.'
+      case 'off':
+        await host.setMode('off')
+        await host.refresh(tm)
+        return 'Time machine off for this project: no snapshots until /tm on. The history stays.'
+      case 'manual':
+        await host.setMode('manual')
+        await host.refresh(tm)
+        return 'Time machine manual: snapshots only on /tm save.'
+      case 'git':
+        return `Inspect the timeline with plain git:\n  ${tm.inspectCommand()}\n  (git show <id>, git diff <a> <b> work with the same --git-dir.)`
+      case 'stats': {
+        const stats = await tm.stats()
+        return `${plural(stats.entries, 'snapshot')}, ${size(stats.bytes)} at ${tm.gitDir}; mode ${await host.mode()}`
+      }
+      case 'prune':
+        return await pruneCommand(host, tm, arg)
+      case 'projects':
+        return await projectsCommand(host, tm, rest, flags)
+      default:
+        return HELP
+    }
+  } catch (error) {
+    return host.report(error)
+  }
+}
+
+async function showText(tm: TimeMachine, entry: Entry, number: string): Promise<string> {
+  const steps = entry.kind === 'turn' ? await tm.steps(entry.id) : []
+  return [
+    `${kindLabel(entry)} · ${entry.title} (${entry.id.slice(0, 7)})`,
+    ...entry.changes.map(change => `  ${statusMark(change)} ${change.path}`),
+    ...(steps.length > 0 ? ['Steps:', ...steps.map((step, i) => `  ${number}.${i + 1} ${stepLabel(step)}  ${countsShort(step)}`)] : []),
+    ...(entry.answer !== '' ? ['Answer:', `  ${clip(oneLine(entry.answer), 400)}`] : []),
+  ].join('\n')
+}
+
+async function pruneCommand(host: Host, tm: TimeMachine, arg: string | undefined): Promise<string> {
+  const days = arg === undefined ? null : /^(\d+)d$/.exec(arg)
+  const options = days ? { olderThanMs: Number(days[1]) * DAY_MS } : arg !== undefined && /^\d+$/.test(arg) ? { keepLast: Number(arg) } : undefined
+  if (!options) return 'Usage: /tm prune 30d (older than 30 days) or /tm prune 50 (keep the newest 50).'
+  const done = await tm.prune(options)
+  await host.refresh(tm)
+  if (done.removed === 0) return 'Nothing to prune.'
+  return `Pruned ${plural(done.removed, 'snapshot')}, kept ${done.kept}. ${size(done.bytesBefore)} → ${size(done.bytesAfter)}.`
+}
+
+async function projectsCommand(host: Host, tm: TimeMachine, rest: string[], flags: Set<string>): Promise<string> {
+  const base = await host.home()
+  const { exec } = host
+  const projects = await listProjects(exec, base)
+  if (rest[0] === 'rm') {
+    const project = projects[Number(rest[1]) - 1]
+    if (!project) return 'Name a project by its number in /tm projects.'
+    const name = project.root || project.name
+    if (!flags.has('--yes')) {
+      return `This deletes the whole history of ${name} (${size(project.bytes)}).\nRun /tm projects rm ${rest[1]} --yes to confirm.`
+    }
+    await deleteProject(exec, base, project.name)
+    if (project.gitDir === tm.gitDir) host.forget(tm.root)
+    return `Deleted the history of ${name}.`
+  }
+  if (projects.length === 0) return 'No project has a history yet.'
+  const total = projects.reduce((sum, one) => sum + one.bytes, 0)
+  return [
+    ...projects.map((one, i) => projectLine(one, i, one.gitDir === tm.gitDir)),
+    `${plural(projects.length, 'project')}, ${size(total)} in ${base}`,
+    'Delete one with /tm projects rm N; trim one with /tm prune inside it.',
+  ].join('\n')
+}
+
+/** `3` (from /tm log), `3.2` (step 2 of it), a commit id, or a checkpoint name. */
+async function resolveRef(tm: TimeMachine, list: Entry[], ref: string | undefined): Promise<Entry> {
+  if (ref === undefined) {
+    if (list[0]) return list[0]
+    throw new Error('No snapshots yet')
+  }
+  const step = /^(\d{1,3})\.(\d{1,3})$/.exec(ref)
+  if (step) {
+    const turn = list[Number(step[1]) - 1]
+    const found = turn ? (await tm.steps(turn.id))[Number(step[2]) - 1] : undefined
+    if (!found) throw new Error(`No step ${ref} (see /tm show ${step[1]})`)
+    return found
+  }
+  const byNumber = /^\d{1,3}$/.test(ref) ? list[Number(ref) - 1] : undefined
+  const name = ref.replace(/^["']|["']$/g, '')
+  const entry = byNumber ?? (/^[0-9a-f]{4,64}$/.test(ref) ? await tm.entry(ref) : undefined) ?? (await tm.findCheckpoint(name))
+  if (!entry) throw new Error(`No snapshot or checkpoint "${name}" (see /tm log)`)
+  return entry
+}

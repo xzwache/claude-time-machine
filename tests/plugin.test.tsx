@@ -40,12 +40,13 @@ function typed(args: string) {
 function fakeHost(on: On, answers: Record<string, string> = {}): string[][] {
   const calls: string[][] = []
   mock.env(on, { HOME: '/home/tester' })
+  mock.store(on)
   on('session.root', () => ({ value: '/work/project' }))
   on('session.id', () => ({ value: 'session-1' }))
   on('fs.write', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
-  on('process.run', ($, e) => {
+  on('process.run', (_, e) => {
     calls.push([...e.argv])
     const key = Object.keys(answers).find(word => e.argv.includes(word))
     const stdout = key === undefined ? '' : (answers[key] ?? '')
@@ -94,6 +95,33 @@ describe('managing histories', () => {
     fakeHost(on)
     const ran = await $.command.run(typed('prune'))
     expect(ran.text).toMatch(/Usage: \/tm prune 30d/)
+  })
+})
+
+describe('modes', () => {
+  test('/tm off stops snapshots around tool calls, /tm on brings them back', async ($, on) => {
+    const calls = fakeHost(on)
+    // Beneath the plugins: a Bash tool that does nothing.
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false } }) as never)
+    const bash = async () => {
+      const before = calls.length
+      await $.tool.call({ tool: 'Bash', command: 'rm -rf build' })
+      return calls.length - before
+    }
+    expect((await $.command.run(typed('off'))).text).toMatch(/off for this project/)
+    expect(await bash()).toBe(0)
+    expect((await $.command.run(typed('stats'))).text).toMatch(/mode off/)
+    expect((await $.command.run(typed('on'))).text).toMatch(/every turn is snapshotted/)
+    expect(await bash()).toBeGreaterThan(0)
+  })
+
+  test('read-only commands run without any snapshot work', async ($, on) => {
+    const calls = fakeHost(on)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false } }) as never)
+    await $.command.run(typed('on'))
+    const before = calls.length
+    await $.tool.call({ tool: 'Bash', command: 'git status && ls -la' })
+    expect(calls.length - before).toBe(0)
   })
 })
 

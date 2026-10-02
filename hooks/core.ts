@@ -11,25 +11,27 @@
 // This module runs both inside Claude Code (through `$.process.run`) and under
 // Node for the tests, so it depends only on the two functions it is given.
 
-import type { Change, ChangeStatus, Counts, Entry, EntryKind, Project } from '../types'
+import type { Change, Entry, EntryKind } from '../types'
+import { ATTRIBUTES, GIT_FLAGS, GitError, chunks, diskUsage } from './git.ts'
+import type { Deps, ExecInit, ExecResult } from './git.ts'
+import { firstLine, message, undoTitle } from './message.ts'
+import type { Meta } from './message.ts'
+import {
+  LOG_FORMAT,
+  group,
+  isDefined,
+  logIds,
+  missingBases,
+  parseDiffTree,
+  parseDiffTreeStdin,
+  parseLog,
+  planCommit,
+  planTurn,
+} from './timeline.ts'
+import type { PathPlan, Raw } from './timeline.ts'
 
-export type { Change, ChangeStatus, Counts, Entry, EntryKind, Project }
-
-export type ExecInit = {
-  cwd?: string
-  env?: Record<string, string>
-  stdin?: string
-  timeoutMs?: number
-}
-
-export type ExecResult = { exitCode: number; stdout: string; stderr: string }
-
-export type Exec = (argv: readonly string[], init: ExecInit) => Promise<ExecResult>
-
-export type Deps = {
-  exec: Exec
-  writeFile: (path: string, text: string) => Promise<void>
-}
+export type { Deps, Exec, ExecInit, ExecResult } from './git.ts'
+export { deleteProject, listProjects } from './projects.ts'
 
 export type RestoreReport = {
   restored: string[]
@@ -45,82 +47,43 @@ export type PruneReport = { removed: number; kept: number; bytesBefore: number; 
 
 type PendingTurn = { turnId: string; prompt: string; startedAt: number; base: string; session: string }
 
-/** A commit as read off the timeline, before turns are grouped. */
-type Raw = {
-  id: string
-  parent: string | null
-  time: number
-  meta: Meta
-  changes: Change[]
-}
+type Timeline = { top: Entry[]; raws: Raw[]; byId: Map<string, Entry>; byRaw: Map<string, Raw> }
 
-type Timeline = {
-  top: Entry[]
-  raws: Raw[]
-  byId: Map<string, Entry>
-  byRaw: Map<string, Raw>
-}
-
-/** How one path goes back: from which snapshot, and what to check first. */
-type PathPlan = {
-  path: string
-  before: string
-  after: string
-  isNew: boolean
-  lastStatus: ChangeStatus
-  isTainted: boolean
+type GitOptions = {
+  stdin?: string
+  timeoutMs?: number
+  trim?: boolean
+  isLenient?: boolean
+  env?: Record<string, string>
 }
 
 const TIMELINE = 'refs/tm/timeline'
 const PENDING = 'refs/tm/pending/'
 const SNAPSHOT_TIMEOUT_MS = 120_000
 const STALE_PENDING_MS = 12 * 60 * 60 * 1000
-const READ_WINDOW = 800
-const CHUNK = 100
-const IGNORED_FILE_LIMIT = '-1025k'
-const ANSWER_MARK = '--- tm-answer ---'
 const ANSWER_LIMIT = 4000
-const PROJECT_NAME = /^[0-9a-f]{16}\.git$/
+const IGNORED_FILE_LIMIT = '-1025k'
+const TMIGNORE = '.tmignore'
 
 // Ignored files a snapshot leaves out even when small: build and editor debris.
 const IGNORED_JUNK = /(^|\/)\.DS_Store$|\.(pyc|pyo|class|o|obj|so|dylib|dll|log|tmp|swp|swo)$/
-
-// Settings that would make a snapshot or a restore differ from the bytes on
-// disk, or make git do more than it is asked, are pinned for every call.
-const GIT_FLAGS = [
-  '-c', 'core.autocrlf=false',
-  '-c', 'core.safecrlf=false',
-  '-c', 'core.symlinks=true',
-  '-c', 'core.fileMode=true',
-  '-c', 'core.quotePath=false',
-  '-c', 'core.hooksPath=/dev/null',
-  '-c', 'commit.gpgSign=false',
-  '-c', 'gc.auto=0',
-  '-c', 'advice.addEmbeddedRepo=false',
-]
-
-// Highest-precedence attributes: no line-ending, LFS or ident conversion, so
-// what is restored is byte for byte what was snapshotted.
-const ATTRIBUTES = '* -text -filter -ident -working-tree-encoding\n'
-
-export class GitError extends Error {
-  constructor(argv: readonly string[], result: ExecResult) {
-    super(`git ${argv.join(' ')} failed (${result.exitCode}): ${result.stderr.trim()}`)
-  }
-}
 
 export class TimeMachine {
   readonly root: string
   readonly gitDir: string
   private deps: Deps
+  private readonly window: number
   private chain: Promise<unknown> = Promise.resolve()
   private isReady = false
-  private cache: { tip: string; window: number; timeline: Timeline } | undefined
+  private cache: { tip: string; timeline: Timeline } | undefined
+  private excludes: string | undefined
 
-  constructor(deps: Deps, root: string, gitDir: string) {
+  /** `window`: how many commits a history read starts with (tests shrink it). */
+  constructor(deps: Deps, root: string, gitDir: string, window = 800) {
     this.deps = deps
     this.root = root.replace(/\/+$/, '')
     this.gitDir = gitDir.replace(/\/+$/, '')
+    this.window = window
   }
 
   /** Swaps the functions it runs with, as each hook brings its own. */
@@ -174,8 +137,7 @@ export class TimeMachine {
    */
   beforeFileWrite(path: string, session: string): Promise<void> {
     return this.serial(async () => {
-      if (!this.isReady || !(await this.readPending(session))) return
-      const rel = this.relative(path)
+      const rel = await this.turnPath(path, session)
       if (rel === undefined) return
       if (await this.isIgnoredAndUntracked(rel)) {
         if (!(await this.existsInWorkTree(rel))) return
@@ -191,8 +153,7 @@ export class TimeMachine {
   /** Called after a file tool wrote `path`: records the write as a step. */
   afterFileWrite(path: string, tool: string, session: string): Promise<void> {
     return this.serial(async () => {
-      if (!this.isReady || !(await this.readPending(session))) return
-      const rel = this.relative(path)
+      const rel = await this.turnPath(path, session)
       if (rel === undefined) return
       const isIgnored = await this.isIgnoredAndUntracked(rel)
       if (isIgnored && (await this.existsInWorkTree(rel))) await this.git(['add', '-f', '--', rel])
@@ -218,6 +179,29 @@ export class TimeMachine {
     })
   }
 
+  /** Saves the work tree now under `name`, changed or not: a bookmark. */
+  save(name: string, session: string | null): Promise<Entry | undefined> {
+    return this.serial(async () => {
+      await this.ensureReady()
+      const tree = await this.snapshot()
+      const tip = await this.tip()
+      const meta: Meta = { kind: 'checkpoint', title: name.trim() || 'Checkpoint' }
+      if (session !== null) meta.session = session
+      return this.readEntry(await this.commit(tree, tip.commit, meta))
+    })
+  }
+
+  /** The newest checkpoint saved under `name` (any case), if there is one. */
+  findCheckpoint(name: string): Promise<Entry | undefined> {
+    return this.serial(async () => {
+      await this.ensureReady()
+      const out = await this.git(['log', '--format=%H%x1f%s', '--grep=^tm-kind: checkpoint$', TIMELINE])
+      const wanted = name.trim().toLowerCase()
+      const found = out.split('\n').find(line => (line.split('\x1f')[1] ?? '').toLowerCase() === wanted)
+      return found === undefined ? undefined : this.readEntry(found.split('\x1f')[0] ?? '')
+    })
+  }
+
   /** The timeline, newest first: turns with their steps folded in. */
   history(limit = 50): Promise<Entry[]> {
     return this.serial(async () => {
@@ -230,9 +214,10 @@ export class TimeMachine {
   steps(id: string): Promise<Entry[]> {
     return this.serial(async () => {
       await this.ensureReady()
-      const { byId } = await this.readTimeline()
-      const turn = byId.get(id)
-      return (turn?.steps ?? []).map(step => byId.get(step)).filter(isDefined)
+      const turn = await this.readEntry(id)
+      if (!turn || turn.steps.length === 0) return []
+      const { byId } = await this.readTimeline(turn.id)
+      return turn.steps.map(step => byId.get(step)).filter(isDefined)
     })
   }
 
@@ -254,9 +239,8 @@ export class TimeMachine {
     return this.serial(async () => {
       const plan = (await this.planFor(id)).find(one => one.path === path)
       if (!plan) return ''
-      return this.git(['diff', '--no-color', '--no-ext-diff', '--no-renames', plan.before, plan.after, '--', path], {
-        trim: false,
-      })
+      const args = ['diff', '--no-color', '--no-ext-diff', '--no-renames', plan.before, plan.after, '--', path]
+      return this.git(args, { trim: false })
     })
   }
 
@@ -278,19 +262,16 @@ export class TimeMachine {
       const changedSince = await this.changedAgainst(plans, plan => plan.after, current.tree)
       const differsFromBefore = await this.changedAgainst(plans, plan => plan.before, current.tree)
       const pending = plans.filter(plan => differsFromBefore.has(plan.path))
-      const settled = plans.filter(plan => !differsFromBefore.has(plan.path))
       const isConflict = (plan: PathPlan) => !isForced && (changedSince.has(plan.path) || plan.isTainted)
-      const conflicts = pending.filter(isConflict)
       const apply = pending.filter(plan => !isConflict(plan))
       await this.applyPlans(apply)
-      const title = entry.kind === 'undo' ? `Redo: ${entry.title.replace(/^(Undo|Redo): /, '')}` : `Undo: ${entry.title}`
-      const done = apply.length === 0 ? undefined : await this.recordRestore('undo', title, entry.id)
+      const done = apply.length === 0 ? undefined : await this.recordRestore('undo', undoTitle(entry.title), entry.id)
       return {
         restored: apply.filter(plan => !plan.isNew && plan.lastStatus !== 'deleted').map(plan => plan.path),
         removed: apply.filter(plan => plan.isNew).map(plan => plan.path),
         recovered: apply.filter(plan => !plan.isNew && plan.lastStatus === 'deleted').map(plan => plan.path),
-        conflicts: conflicts.map(plan => plan.path),
-        unchanged: settled.map(plan => plan.path),
+        conflicts: pending.filter(isConflict).map(plan => plan.path),
+        unchanged: plans.filter(plan => !differsFromBefore.has(plan.path)).map(plan => plan.path),
         entry: done,
       }
     })
@@ -307,6 +288,7 @@ export class TimeMachine {
       if (!entry) throw new Error(`No snapshot named ${ref}`)
       const current = await this.recordOutside(null, 'Changes outside Claude')
       const changes = await this.diffTrees(current.tree, entry.id)
+      // Going from now to the target: a path the target lacks is removed.
       await this.applyPlans(
         changes.map(change => ({
           path: change.path,
@@ -317,11 +299,13 @@ export class TimeMachine {
           isTainted: false,
         })),
       )
-      const done = changes.length === 0 ? undefined : await this.recordRestore('travel', `Travel to: ${entry.title}`, entry.id)
+      const title = `Travel to: ${entry.title}`
+      const done = changes.length === 0 ? undefined : await this.recordRestore('travel', title, entry.id)
+      const paths = (status: Change['status']) => changes.filter(change => change.status === status).map(change => change.path)
       return {
-        restored: changes.filter(change => change.status === 'modified').map(change => change.path),
-        removed: changes.filter(change => change.status === 'deleted').map(change => change.path),
-        recovered: changes.filter(change => change.status === 'added').map(change => change.path),
+        restored: paths('modified'),
+        removed: paths('deleted'),
+        recovered: paths('added'),
         conflicts: [],
         unchanged: [],
         entry: done,
@@ -351,43 +335,40 @@ export class TimeMachine {
 
   /**
    * Forgets snapshots older than `olderThanMs` or beyond the newest `keepLast`
-   * top-level entries, whichever keeps less. The oldest kept state becomes the
-   * new baseline, so every kept entry can still be undone and travelled to.
+   * top-level entries, whichever keeps less. The state every kept entry
+   * started from stays, as the new baseline, so each can still be undone.
    */
   prune(options: { olderThanMs?: number; keepLast?: number }): Promise<PruneReport> {
     return this.serial(async () => {
       await this.ensureReady()
       if ((await this.pendingRefs()).length > 0) throw new Error('A turn is running; prune when it ends')
       const bytesBefore = await diskUsage(this.deps.exec, this.gitDir)
-      const { top, raws } = await this.readTimeline(Number.MAX_SAFE_INTEGER)
+      const { top, raws } = await this.readAll()
       const cutoff = options.olderThanMs === undefined ? -Infinity : Date.now() - options.olderThanMs
       let keep = top.filter(entry => entry.time >= cutoff && entry.kind !== 'baseline')
       if (options.keepLast !== undefined) keep = keep.slice(0, options.keepLast)
-      const oldestKept = keep.at(-1)
-      // The new baseline is the state the oldest kept entry started from.
-      const rootId = oldestKept ? (oldestKept.base ?? oldestKept.parent) : top[0]?.id
-      const rootIndex = raws.findIndex(raw => raw.id === rootId)
-      if (rootId === undefined || rootId === null || rootIndex < 0) throw new Error('Nothing to prune')
+      const indexOf = new Map(raws.map((raw, i) => [raw.id, i]))
+      // The new baseline: the oldest state any kept entry starts from. A turn
+      // of another session can start before an entry that ended after it.
+      const starts = keep.map(entry => indexOf.get(entry.base ?? entry.parent ?? '') ?? raws.length - 1)
+      const rootIndex = starts.length > 0 ? Math.max(...starts) : 0
+      const rootId = raws[rootIndex]?.id
       const removed = raws.length - rootIndex - 1
-      if (removed === 0) {
+      if (rootId === undefined || removed === 0) {
         return { removed: 0, kept: raws.length, bytesBefore, bytesAfter: bytesBefore }
       }
       const tip = await this.tip()
       const map = new Map<string, string>()
-      const date = new Date((raws[rootIndex]?.time ?? 0)).toISOString().slice(0, 10)
-      map.set(rootId, await this.git(['commit-tree', rootId + '^{tree}'], {
-        stdin: message({ kind: 'baseline', title: `Baseline (history before ${date} pruned)` }),
-      }))
+      const date = new Date(raws[rootIndex]?.time ?? 0).toISOString().slice(0, 10)
+      const baseline = message({ kind: 'baseline', title: `Baseline (history before ${date} pruned)` })
+      map.set(rootId, await this.git(['commit-tree', `${rootId}^{tree}`], { stdin: baseline }))
       for (const raw of raws.slice(0, rootIndex).reverse()) {
         const parent = raw.parent === null ? undefined : map.get(raw.parent)
-        const meta: Meta = { ...raw.meta }
-        if (meta.base !== undefined) meta.base = map.get(meta.base)
-        if (meta.target !== undefined) meta.target = map.get(meta.target)
+        const meta: Meta = { ...raw.meta, base: raw.meta.base && map.get(raw.meta.base), target: raw.meta.target && map.get(raw.meta.target) }
         const args = ['commit-tree', `${raw.id}^{tree}`, ...(parent ? ['-p', parent] : [])]
         map.set(raw.id, await this.git(args, { stdin: message(meta), env: commitTime(raw.time) }))
       }
       await this.git(['update-ref', TIMELINE, map.get(tip.commit) ?? '', tip.commit])
-      await this.git(['reflog', 'expire', '--expire=now', '--all'], { isLenient: true })
       await this.git(['gc', '--prune=now', '--quiet'], { timeoutMs: SNAPSHOT_TIMEOUT_MS, isLenient: true })
       return { removed, kept: rootIndex + 1, bytesBefore, bytesAfter: await diskUsage(this.deps.exec, this.gitDir) }
     })
@@ -418,11 +399,15 @@ export class TimeMachine {
     this.isReady = true
   }
 
+  /** The path a file tool names, relative to the root, while a turn runs. */
+  private async turnPath(path: string, session: string): Promise<string | undefined> {
+    if (!this.isReady || !(await this.readPending(session))) return undefined
+    return this.relative(path)
+  }
+
   private async closeTurn(pending: PendingTurn, isInterrupted: boolean, answer: string): Promise<Entry | undefined> {
     await this.recordOutside(pending.session, "Changes not made by Claude's tools")
-    const { raws } = await this.readTimeline()
-    const baseIndex = raws.findIndex(raw => raw.id === pending.base)
-    const range = baseIndex < 0 ? [] : raws.slice(0, baseIndex)
+    const range = await this.readRaws([`${pending.base}..${TIMELINE}`])
     const hasSteps = range.some(raw => raw.meta.kind === 'step' && raw.meta.session === pending.session)
     let recorded: Entry | undefined
     if (hasSteps) {
@@ -488,11 +473,7 @@ export class TimeMachine {
   }
 
   /** The paths whose state at `tree` differs from the snapshot each plan names. */
-  private async changedAgainst(
-    plans: PathPlan[],
-    pick: (plan: PathPlan) => string,
-    tree: string,
-  ): Promise<Set<string>> {
+  private async changedAgainst(plans: PathPlan[], pick: (plan: PathPlan) => string, tree: string): Promise<Set<string>> {
     const groups = new Map<string, string[]>()
     for (const plan of plans) groups.set(pick(plan), [...(groups.get(pick(plan)) ?? []), plan.path])
     const changed = new Set<string>()
@@ -506,26 +487,20 @@ export class TimeMachine {
 
   /** For each path an entry changed: where it goes back to, and from what. */
   private async planFor(id: string): Promise<PathPlan[]> {
-    const { byRaw } = await this.readTimeline()
     const entry = await this.readEntry(id)
     if (!entry?.parent) return []
-    if (entry.kind !== 'turn' || entry.base === null) {
-      const own = byRaw.get(entry.id)?.changes ?? (await this.diffTrees(entry.parent, entry.id))
-      return own.map(change => ({
-        path: change.path,
-        before: entry.parent ?? '',
-        after: entry.id,
-        isNew: change.status === 'added',
-        lastStatus: change.status,
-        isTainted: false,
-      }))
+    if (entry.kind === 'turn' && entry.base !== null) {
+      const { byRaw } = await this.readTimeline(entry.id)
+      return planTurn(entry, byRaw)
     }
-    return planTurn(entry, byRaw)
+    return planCommit(entry.id, entry.parent, entry.changes)
   }
 
   private async snapshot(): Promise<string> {
+    await this.syncExcludes()
     await this.git(['add', '-A', '--ignore-errors'], { timeoutMs: SNAPSHOT_TIMEOUT_MS, isLenient: true })
     await this.addSmallIgnoredFiles()
+    await this.dropExcluded()
     return this.git(['write-tree'])
   }
 
@@ -550,6 +525,31 @@ export class TimeMachine {
     }
   }
 
+  /**
+   * `.tmignore` at the project root, in .gitignore syntax, names paths the
+   * time machine never snapshots. It becomes the shadow repository's
+   * info/exclude, so `git add -A` does not even walk them.
+   */
+  private async syncExcludes(): Promise<void> {
+    const read = await this.run(['cat', '--', `${this.root}/${TMIGNORE}`], {})
+    const text = read.exitCode === 0 ? read.stdout : ''
+    if (text === this.excludes) return
+    await this.deps.writeFile(`${this.gitDir}/info/exclude`, text)
+    this.excludes = text
+  }
+
+  /** Drops from the index what `.tmignore` names, force-added files included. */
+  private async dropExcluded(): Promise<void> {
+    if (!this.excludes) return
+    const listed = await this.git(['ls-files', '-z', '--cached', '--ignored', `--exclude-from=${this.gitDir}/info/exclude`], {
+      trim: false,
+      isLenient: true,
+      env: { GIT_LITERAL_PATHSPECS: '0' },
+    })
+    const paths = listed.split('\0').filter(Boolean)
+    for (const chunk of chunks(paths)) await this.git(['rm', '-q', '--cached', '--ignore-unmatch', '--', ...chunk])
+  }
+
   private async tip(): Promise<{ commit: string; tree: string }> {
     const [commit = '', tree = ''] = (await this.git(['rev-parse', TIMELINE, `${TIMELINE}^{tree}`])).split('\n')
     return { commit, tree }
@@ -560,10 +560,7 @@ export class TimeMachine {
     let onto = parent
     for (let attempt = 0; ; attempt++) {
       const id = await this.git(['commit-tree', tree, '-p', onto], { stdin: message(meta) })
-      const moved = await this.run(['git', ...GIT_FLAGS, 'update-ref', TIMELINE, id, onto], {
-        cwd: this.root,
-        env: this.env(),
-      })
+      const moved = await this.run(['git', ...GIT_FLAGS, 'update-ref', TIMELINE, id, onto], { cwd: this.root, env: this.env() })
       if (moved.exitCode === 0) return id
       if (attempt >= 5) throw new GitError(['update-ref', TIMELINE], moved)
       onto = (await this.tip()).commit
@@ -571,11 +568,8 @@ export class TimeMachine {
   }
 
   private async readPending(session: string): Promise<PendingTurn | undefined> {
-    const ref = await this.run(['git', ...GIT_FLAGS, 'rev-parse', '--verify', '-q', pendingRef(session)], {
-      env: this.env(),
-    })
-    if (ref.exitCode !== 0) return undefined
-    return this.readPendingBlob(ref.stdout.trim())
+    const ref = await this.run(['git', ...GIT_FLAGS, 'rev-parse', '--verify', '-q', pendingRef(session)], { env: this.env() })
+    return ref.exitCode === 0 ? this.readPendingBlob(ref.stdout.trim()) : undefined
   }
 
   private async readPendingBlob(blob: string): Promise<PendingTurn | undefined> {
@@ -611,74 +605,49 @@ export class TimeMachine {
       env: this.env(),
     })
     if (found.exitCode !== 0) return undefined
-    const id = found.stdout.trim()
-    const { byId } = await this.readTimeline()
-    if (byId.has(id)) return byId.get(id)
-    const [raw] = await this.readRaws([id, '-n', '1'])
-    return raw ? toEntry(raw) : undefined
+    return (await this.readTimeline(found.stdout.trim())).byId.get(found.stdout.trim())
   }
 
-  /** The newest commits on the timeline, read in two git calls, then grouped. */
-  private async readTimeline(window = READ_WINDOW): Promise<Timeline> {
+  /**
+   * The newest commits on the timeline, grouped into turns. Reads `window`
+   * commits, and reads further back while `including` is not among them or a
+   * turn's base is missing, so every turn read is whole.
+   */
+  private async readTimeline(including?: string): Promise<Timeline> {
     const tip = await this.git(['rev-parse', TIMELINE])
-    if (this.cache?.tip === tip && this.cache.window === window) return this.cache.timeline
-    const limit = Number.isFinite(window) ? ['-n', String(window)] : []
-    const raws = await this.readRaws([TIMELINE, ...limit])
-    const { top, byId } = group(raws)
-    const timeline = { top, raws, byId, byRaw: new Map(raws.map(raw => [raw.id, raw])) }
-    this.cache = { tip, window, timeline }
+    let timeline = this.cache?.tip === tip ? this.cache.timeline : undefined
+    for (let window = this.window; ; window *= 4) {
+      const isWhole = timeline !== undefined && (including === undefined || timeline.byRaw.has(including))
+      if (isWhole && timeline !== undefined && missingBases(timeline.raws).length === 0) break
+      timeline = this.toTimeline(await this.readRaws([TIMELINE, '-n', String(window)]))
+      if (timeline.raws.length < window) break
+    }
+    this.cache = { tip, timeline }
     return timeline
   }
 
-  private async readRaws(range: string[]): Promise<Raw[]> {
-    const log = await this.git(['log', '--format=%x1e%H%x1f%P%x1f%ct%x1f%B', ...range], { trim: false })
-    const records = log.split('\x1e').filter(record => record.trim() !== '')
-    const ids = records.map(record => record.split('\x1f')[0] ?? '')
-    const changes = await this.changesOf(ids)
-    return records.map(record => {
-      const [id = '', parents = '', time = '0', body = ''] = record.split('\x1f')
-      return {
-        id,
-        parent: parents.trim().split(' ')[0] || null,
-        time: Number(time) * 1000,
-        meta: parseMessage(body),
-        changes: changes.get(id) ?? [],
-      }
-    })
+  private async readAll(): Promise<Timeline> {
+    return this.toTimeline(await this.readRaws([TIMELINE]))
   }
 
-  /** Each commit's changes against its parent, in one diff-tree call. */
-  private async changesOf(ids: string[]): Promise<Map<string, Change[]>> {
-    const result = new Map<string, Change[]>()
-    if (ids.length === 0) return result
-    const out = await this.git(['diff-tree', '-r', '-z', '--no-renames', '--name-status', '--always', '--stdin'], {
-      stdin: `${ids.join('\n')}\n`,
-      trim: false,
-    })
-    const parts = out.split('\0')
-    let current: Change[] | undefined
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i] ?? ''
-      if (/^[0-9a-f]{40,64}$/.test(part)) {
-        current = []
-        result.set(part, current)
-      } else if (current && /^[ADMT]$/.test(part)) {
-        current.push({ status: statusOf(part), path: parts[++i] ?? '' })
-      }
-    }
-    return result
+  private toTimeline(raws: Raw[]): Timeline {
+    const { top, byId } = group(raws)
+    return { top, raws, byId, byRaw: new Map(raws.map(raw => [raw.id, raw])) }
+  }
+
+  /** Commits and their changes, in two git calls. */
+  private async readRaws(range: string[]): Promise<Raw[]> {
+    const log = await this.git(['log', LOG_FORMAT, ...range], { trim: false })
+    const ids = logIds(log)
+    if (ids.length === 0) return []
+    const args = ['diff-tree', '-r', '-z', '--no-renames', '--name-status', '--always', '--stdin']
+    const changes = parseDiffTreeStdin(await this.git(args, { stdin: `${ids.join('\n')}\n`, trim: false }))
+    return parseLog(log, changes)
   }
 
   private async diffTrees(from: string, to: string, paths: string[] = []): Promise<Change[]> {
     const args = ['diff-tree', '-r', '-z', '--no-renames', '--name-status', from, to]
-    const out = await this.git(paths.length > 0 ? [...args, '--', ...paths] : args, { trim: false })
-    const parts = out.split('\0')
-    const changes: Change[] = []
-    for (let i = 0; i + 1 < parts.length; i += 2) {
-      const path = parts[i + 1] ?? ''
-      if (path !== '') changes.push({ status: statusOf(parts[i] ?? ''), path })
-    }
-    return changes
+    return parseDiffTree(await this.git(paths.length > 0 ? [...args, '--', ...paths] : args, { trim: false }))
   }
 
   private async isIgnoredAndUntracked(rel: string): Promise<boolean> {
@@ -692,8 +661,7 @@ export class TimeMachine {
   }
 
   private async existsInWorkTree(rel: string): Promise<boolean> {
-    const result = await this.run(['test', '-e', rel, '-o', '-L', rel], { cwd: this.root })
-    return result.exitCode === 0
+    return (await this.run(['test', '-e', rel, '-o', '-L', rel], { cwd: this.root })).exitCode === 0
   }
 
   /** The path relative to the project root, or undefined when outside it. */
@@ -726,15 +694,11 @@ export class TimeMachine {
     }
   }
 
-  private async git(
-    args: string[],
-    options: { stdin?: string; timeoutMs?: number; trim?: boolean; isLenient?: boolean; env?: Record<string, string> } = {},
-  ): Promise<string> {
-    const argv = ['git', ...GIT_FLAGS, ...args]
+  private async git(args: string[], options: GitOptions = {}): Promise<string> {
     const init: ExecInit = { cwd: this.root, env: { ...this.env(), ...options.env } }
     if (options.stdin !== undefined) init.stdin = options.stdin
     if (options.timeoutMs !== undefined) init.timeoutMs = options.timeoutMs
-    const result = await this.run(argv, init)
+    const result = await this.run(['git', ...GIT_FLAGS, ...args], init)
     if (result.exitCode !== 0 && !options.isLenient) throw new GitError(args, result)
     return options.trim === false ? result.stdout : result.stdout.trim()
   }
@@ -744,188 +708,6 @@ export class TimeMachine {
   }
 }
 
-/** Every project's shadow repository under `home`, newest activity first. */
-export async function listProjects(exec: Exec, home: string): Promise<Project[]> {
-  const listed = await exec(['ls', '-1', home], {})
-  const names = listed.exitCode === 0 ? listed.stdout.split('\n').filter(name => PROJECT_NAME.test(name)) : []
-  const projects: Project[] = []
-  for (const name of names) {
-    const gitDir = `${home}/${name}`
-    const git = (args: string[]) => exec(['git', `--git-dir=${gitDir}`, ...args], {})
-    const root = (await git(['config', 'tm.root'])).stdout.trim()
-    const count = Number((await git(['rev-list', '--count', TIMELINE])).stdout.trim()) || 0
-    const last = Number((await git(['log', '-1', '--format=%ct', TIMELINE])).stdout.trim()) || 0
-    const isRootPresent = root !== '' && (await exec(['test', '-d', root], {})).exitCode === 0
-    projects.push({ name, gitDir, root, isRootPresent, entries: count, bytes: await diskUsage(exec, gitDir), lastTime: last * 1000 })
-  }
-  return projects.sort((a, b) => b.lastTime - a.lastTime)
-}
-
-/** Deletes one project's shadow repository: its whole history. */
-export async function deleteProject(exec: Exec, home: string, name: string): Promise<void> {
-  if (!PROJECT_NAME.test(name)) throw new Error(`Not a time machine repository: ${name}`)
-  const result = await exec(['rm', '-rf', '--', `${home}/${name}`], {})
-  if (result.exitCode !== 0) throw new Error(`Could not delete ${name}: ${result.stderr.trim()}`)
-}
-
-async function diskUsage(exec: Exec, path: string): Promise<number> {
-  const result = await exec(['du', '-sk', path], {})
-  return (Number(result.stdout.split('\t')[0]) || 0) * 1024
-}
-
-/**
- * Folds each turn's steps into it. Reading newest first, a turn marker claims
- * the commits back to its base: its session's steps, and every commit there
- * not claimed by another session's turn (outside changes, captures).
- */
-function group(raws: Raw[]): { top: Entry[]; byId: Map<string, Entry> } {
-  const byId = new Map<string, Entry>()
-  const claimed = new Set<string>()
-  const indexOf = new Map(raws.map((raw, i) => [raw.id, i]))
-  for (const [i, raw] of raws.entries()) {
-    const entry = toEntry(raw)
-    byId.set(raw.id, entry)
-    const baseIndex = raw.meta.base === undefined ? undefined : indexOf.get(raw.meta.base)
-    if (raw.meta.kind !== 'turn' || baseIndex === undefined) continue
-    const range = raws.slice(i + 1, baseIndex).reverse()
-    const mine = range.filter(one => !claimed.has(one.id) && isTurnPart(one, raw.meta.session))
-    for (const one of mine) claimed.add(one.id)
-    entry.steps = mine.filter(one => one.meta.kind !== 'capture').map(one => one.id)
-    entry.changes = netChanges(planTurn(entry, new Map(range.map(one => [one.id, one]))))
-    entry.counts = countsOf(entry.changes)
-  }
-  const top = raws.filter(raw => !claimed.has(raw.id) && raw.meta.kind !== 'capture').map(raw => byId.get(raw.id)).filter(isDefined)
-  return { top, byId }
-}
-
-function isTurnPart(raw: Raw, session: string | undefined): boolean {
-  return raw.meta.kind === 'outside' || raw.meta.kind === 'capture' || (raw.meta.kind === 'step' && raw.meta.session === session)
-}
-
-/**
- * A turn's paths: each goes back to its state before the first step that
- * touched it. A change by anything else after that taints the path, so undo
- * treats it as a conflict instead of discarding that change.
- */
-function planTurn(turn: Entry, byRaw: Map<string, Raw>): PathPlan[] {
-  const plans = new Map<string, PathPlan>()
-  const range: Raw[] = []
-  let at = turn.parent
-  while (at !== null && at !== turn.base) {
-    const raw = byRaw.get(at)
-    if (!raw) break
-    range.unshift(raw)
-    at = raw.parent
-  }
-  for (const raw of range) {
-    const isClaude = raw.meta.kind === 'step' && raw.meta.session === turn.session
-    for (const change of raw.changes) {
-      const plan = plans.get(change.path)
-      if (isClaude && !plan) {
-        plans.set(change.path, {
-          path: change.path,
-          before: raw.parent ?? '',
-          after: raw.id,
-          isNew: change.status === 'added',
-          lastStatus: change.status,
-          isTainted: false,
-        })
-      } else if (isClaude && plan) {
-        plan.after = raw.id
-        plan.lastStatus = change.status
-      } else if (plan) {
-        plan.isTainted = true
-      }
-    }
-  }
-  return [...plans.values()]
-}
-
-function netChanges(plans: PathPlan[]): Change[] {
-  const changes: Change[] = []
-  for (const plan of plans) {
-    if (plan.isNew && plan.lastStatus === 'deleted') continue
-    const status: ChangeStatus = plan.isNew ? 'added' : plan.lastStatus === 'deleted' ? 'deleted' : 'modified'
-    changes.push({ status, path: plan.path })
-  }
-  return changes
-}
-
-function countsOf(changes: Change[]): Counts {
-  const counts: Counts = { added: 0, modified: 0, deleted: 0 }
-  for (const change of changes) counts[change.status]++
-  return counts
-}
-
-function toEntry(raw: Raw): Entry {
-  return {
-    id: raw.id,
-    parent: raw.parent,
-    time: raw.time,
-    kind: raw.meta.kind,
-    title: raw.meta.title,
-    prompt: raw.meta.prompt ?? '',
-    answer: raw.meta.answer ?? '',
-    session: raw.meta.session ?? null,
-    base: raw.meta.base ?? null,
-    target: raw.meta.target ?? null,
-    isInterrupted: raw.meta.isInterrupted === true,
-    changes: raw.changes,
-    counts: countsOf(raw.changes),
-    steps: [],
-  }
-}
-
-function statusOf(code: string): ChangeStatus {
-  return code === 'A' ? 'added' : code === 'D' ? 'deleted' : 'modified'
-}
-
-type Meta = {
-  kind: EntryKind
-  title: string
-  prompt?: string
-  answer?: string
-  session?: string
-  base?: string | undefined
-  target?: string | undefined
-  isInterrupted?: boolean
-}
-
-// Subject, then `tm-*` header lines, then a blank line, the prompt and the
-// answer. The headers come before the free text so a prompt cannot forge one.
-function message(meta: Meta): string {
-  const lines = [meta.title.replace(/\s+/g, ' ').slice(0, 200), '', `tm-kind: ${meta.kind}`]
-  if (meta.session) lines.push(`tm-session: ${meta.session.replace(/\s+/g, '')}`)
-  if (meta.base) lines.push(`tm-base: ${meta.base}`)
-  if (meta.target) lines.push(`tm-target: ${meta.target}`)
-  if (meta.isInterrupted) lines.push('tm-interrupted: true')
-  if (meta.prompt || meta.answer) lines.push('', meta.prompt ?? '')
-  if (meta.answer) lines.push(ANSWER_MARK, meta.answer)
-  return `${lines.join('\n')}\n`
-}
-
-function parseMessage(body: string): Meta {
-  const lines = body.replace(/^\n+/, '').split('\n')
-  const meta: Meta = { kind: 'outside', title: lines[0] ?? '' }
-  let i = 2
-  for (; i < lines.length; i++) {
-    const header = /^tm-([a-z]+): (.*)$/.exec(lines[i] ?? '')
-    if (!header) break
-    const [, key, value = ''] = header
-    if (key === 'kind') meta.kind = value as EntryKind
-    else if (key === 'session') meta.session = value
-    else if (key === 'base') meta.base = value
-    else if (key === 'target') meta.target = value
-    else if (key === 'interrupted') meta.isInterrupted = value === 'true'
-  }
-  const text = lines.slice(i + 1).join('\n').replace(/\n+$/, '')
-  const mark = text.lastIndexOf(`\n${ANSWER_MARK}\n`)
-  const prompt = mark < 0 ? text : text.slice(0, mark)
-  if (prompt) meta.prompt = prompt
-  if (mark >= 0) meta.answer = text.slice(mark + ANSWER_MARK.length + 2)
-  return meta
-}
-
 function pendingRef(session: string): string {
   return `${PENDING}${session.replace(/[^A-Za-z0-9_-]/g, '') || 'default'}`
 }
@@ -933,21 +715,6 @@ function pendingRef(session: string): string {
 function commitTime(time: number): Record<string, string> {
   const stamp = `${Math.floor(time / 1000)} +0000`
   return { GIT_AUTHOR_DATE: stamp, GIT_COMMITTER_DATE: stamp }
-}
-
-function firstLine(text: string): string {
-  const line = text.split('\n').find(one => one.trim() !== '') ?? ''
-  return line.trim().slice(0, 80)
-}
-
-function chunks<T>(list: T[]): T[][] {
-  const out: T[][] = []
-  for (let i = 0; i < list.length; i += CHUNK) out.push(list.slice(i, i + CHUNK))
-  return out
-}
-
-function isDefined<T>(value: T | undefined): value is T {
-  return value !== undefined
 }
 
 function assertSafePath(path: string): void {
