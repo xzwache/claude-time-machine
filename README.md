@@ -62,10 +62,10 @@ They work fine side by side.
 of a turn, and getting back with `git checkout` or `git stash` throws away your own uncommitted work along with
 Claude's. The time machine keeps every step without touching your repository, and undo leaves your edits alone.
 
-**…use [bashward](https://github.com/f4rkh4d/bashward)?** bashward is a Bash hook that reads each command, guesses
-which paths it will write (`rm`, `mv`, `cp`, `dd`, `sed -i`, `tee`, `truncate`, `>` redirects) and copies them before
-it runs. As of 0.1.1, it judges a command by its first word, so `cd src && rm old.ts` or `make clean && rm -rf dist` slip past it,
-as do globs like `rm *.log` and anything that writes without naming the path: `npm run codegen`, `git checkout .`, a
+**…use [bashward](https://github.com/f4rkh4d/bashward)?** bashward is a Bash hook that reads each command, guesses which
+paths it will write (`rm`, `mv`, `cp`, `dd`, `sed -i`, `tee`, `truncate`, `>` redirects) and copies them before it runs.
+As of 0.1.1, it judges a command by its first word, so `cd src && rm old.ts` or `make clean && rm -rf dist` slip past
+it, as do globs like `rm *.log` and anything that writes without naming the path: `npm run codegen`, `git checkout .`, a
 formatter, a migration. The time machine does not guess: it snapshots the project before and after each command and
 records what actually changed. bashward does reach files outside the project, which the time machine does not.
 
