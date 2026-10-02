@@ -69,7 +69,14 @@ Start Claude in a git project. The time machine starts on its own; in any other 
 
 ## Use
 
-After a turn that changed files, a band above the prompt offers **Undo turn** (`u`) and **Review** (`r`).
+After a turn that changed files, a band above the prompt offers **Undo turn** (`u`) and **Review** (`r`). When the
+turn touched something that deserves a second look (CI config, dependencies or an install script, a secrets file, a new
+executable, a mass delete), a second line says what, with **Undo these** (`x`) to revert only that:
+
+```
+⏱ Claude changed 2 modified · 2 created          [ Undo turn ]  [ Review ]  ×
+⚠ CI config · deps +left-pad · install script    [ Undo these ]
+```
 
 | Command                         | What it does                                                        |
 | ------------------------------- | ------------------------------------------------------------------- |
@@ -77,6 +84,7 @@ After a turn that changed files, a band above the prompt offers **Undo turn** (`
 | `/tm log`                       | List snapshots, newest first                                        |
 | `/tm show 3`                    | Files, steps and Claude's answer for snapshot 3                     |
 | `/tm undo` · `/tm undo 3.2`     | Undo the latest turn · undo step 2 of turn 3                        |
+| `/tm undo 3 --sensitive`        | Undo only what the security diff flagged in turn 3                  |
 | `/tm redo`                      | Undo the last undo                                                  |
 | `/tm travel 5`                  | Put the whole project back to snapshot 5                            |
 | `/tm save "before refactor"`    | Bookmark now; `/tm travel "before refactor"` comes back             |

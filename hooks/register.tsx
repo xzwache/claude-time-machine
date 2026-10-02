@@ -11,6 +11,7 @@ import type { Host } from '../src/commands.ts'
 import { TimeMachine } from '../src/index.ts'
 import type { Deps } from '../src/index.ts'
 import { countsText, plural, summaryLine } from '../src/format.ts'
+import { alertLine } from '../src/sensitive.ts'
 import { heatTree, turnsOf, viewOf } from '../src/heat.ts'
 import type { Heat } from '../src/heat.ts'
 import { bandView, heatView, paneView } from '../src/view.tsx'
@@ -80,7 +81,12 @@ export const register: Register = on => {
     await quietly($, async (tm, session) => {
       const entry = await tm.finishTurn(e.turnId, session, e.isAborted, e.answer)
       if (entry) {
-        await update($, band, () => ({ id: entry.id, summary: countsText(entry), result: null }))
+        const findings = await tm.findings(entry.id).catch(error => {
+          report($, error)
+          return []
+        })
+        const alert = findings.length > 0 ? alertLine(findings) : null
+        await update($, band, () => ({ id: entry.id, summary: countsText(entry), alert, result: null }))
         await refresh($, tm)
       }
       void tm.maintain().catch(error => report($, error))
@@ -130,7 +136,8 @@ export const register: Register = on => {
     if (shown === null || e.props.hasSurvey || e.props.isWorking) return next(e)
 
     return bandView($.ui.resolve(e), shown, Math.max(20, e.props.bodyColumns), {
-      undo: () => void undoFromBand($, shown.id),
+      undo: () => void undoFromBand($, shown.id, false),
+      undoSensitive: () => void undoFromBand($, shown.id, true),
       review: () => void openPane($, shown.id),
       close: () => void update($, band, () => null),
     })
@@ -383,11 +390,12 @@ async function openPane($: EngineInterface, id: string | undefined): Promise<boo
   return opened.isPlaced
 }
 
-async function undoFromBand($: EngineInterface, id: string): Promise<void> {
+async function undoFromBand($: EngineInterface, id: string, isSensitiveOnly: boolean): Promise<void> {
   let result: string
   try {
     const tm = await machine($)
-    result = `⏱ ${summaryLine(await tm.undo(id), id)}  (/tm redo brings it back)`
+    const done = isSensitiveOnly ? await tm.undoSensitive(id) : await tm.undo(id)
+    result = done ? `⏱ ${summaryLine(done, id)}  (/tm redo brings it back)` : '⏱ Nothing flagged to undo.'
     await refresh($, tm)
   } catch (error) {
     result = report($, error)

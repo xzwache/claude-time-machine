@@ -7,10 +7,11 @@
 //
 // The history is written by the time machine itself, as Claude Code would:
 // turns of Write, Edit and Bash steps, edits of yours between and during
-// turns, a second session, an interrupted turn, a checkpoint and an undo.
+// turns, a second session, an interrupted turn, a checkpoint, an undo, and a
+// turn the security diff flags.
 
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, realpath, rm, unlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, realpath, rm, unlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -219,6 +220,28 @@ async function seed(root: string): Promise<void> {
   if (config) await box.tm.undo(config.id)
 
   await box.turn(
+    'Add a release pipeline',
+    [
+      { write: '.github/workflows/release.yml', text: 'on:\n  push:\n    tags: [v*]\n' },
+      {
+        bash: 'npm install left-pad && chmod +x scripts/release.sh',
+        run: async () => {
+          const manifest = {
+            name: 'notes-app',
+            version: '1.0.0',
+            dependencies: { 'left-pad': '^1.3.0' },
+            scripts: { postinstall: 'node scripts/fetch-binaries.js' },
+          }
+          await box.put('package.json', `${JSON.stringify(manifest, null, 2)}\n`)
+          await box.put('scripts/release.sh', '#!/bin/sh\nnpm publish\n')
+          await chmod(join(real, 'scripts/release.sh'), 0o755)
+        },
+      },
+    ],
+    { session: main },
+  )
+
+  await box.turn(
     'Rework the login once more',
     [
       { edit: 'src/login.ts', change: text => text.replace('// login 1\n', '// login 1 (reworked)\n') },
@@ -256,10 +279,20 @@ const CHECKS: Check[] = [
   { args: 'heat 30d', expect: /Hottest files/ },
   { args: 'heat open', expect: /heat map .*\/heat\/[0-9a-f]{16}\.html/ },
   { args: 'patch', expect: /Wrote .+\.patch/ },
+  {
+    args: 'show 3',
+    expect:
+      /Sensitive:\n\s+⚠ CI config\s+\.github\/workflows\/release\.yml\n\s+⚠ dependencies\s+package\.json {2}\+left-pad\n\s+⚠ install script\s+package\.json {2}postinstall: node scripts\/fetch-binaries\.js\n\s+⚠ new executable\s+scripts\/release\.sh/,
+  },
+  {
+    args: 'undo 3 --sensitive',
+    expect:
+      /Undo the sensitive changes of claude "Add a release pipeline":\n.+Restored 1 modified file\n.+Removed 2 files/,
+  },
   { args: 'save "sandbox check"', expect: /Saved checkpoint "sandbox check"/ },
   { args: 'undo', expect: /Restored 1 modified file\n.+Left alone, changed by someone else since: src\/routes\.ts/ },
   { args: 'redo', expect: /Redo "Add rate limiting":\n.+Restored 1 modified file/ },
-  { args: 'undo 5.1', expect: /Undo step "Edit src\/login\.ts":\n.+Restored 1 modified file/ },
+  { args: 'undo 6.1', expect: /Undo step "Edit src\/login\.ts":\n.+Restored 1 modified file/ },
   { args: 'travel "before refactor"', expect: /Travelled to "before refactor"/ },
   { args: 'log 4', expect: /travel/ },
   { args: 'travel "sandbox check"', expect: /Travelled to "sandbox check"/ },

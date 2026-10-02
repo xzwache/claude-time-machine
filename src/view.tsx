@@ -6,6 +6,7 @@ import type { EngineInterface, RenderElement, RenderSurface } from 'claude-code'
 
 import { clip, countsShort, entryLine, hunksOf, kindLabel, oneLine, statusMark, stepLabel } from './format.ts'
 import { METRICS, METRIC_LABELS, METRIC_UNITS, describe, valueLabel } from './heat.ts'
+import { kindOfPath } from './sensitive.ts'
 import { heatColor, hex, intensity, maxValue, rasterCells, svgTreemap } from './treemap.ts'
 import type { Band, Details, Entry, HeatMetric, HeatNode, HeatView } from '../types'
 
@@ -13,6 +14,7 @@ type Table = ReturnType<EngineInterface['ui']['resolve']>
 
 export type BandHandlers = {
   undo: () => void
+  undoSensitive: () => void
   review: () => void
   close: () => void
 }
@@ -31,11 +33,19 @@ export function bandView(table: Table, shown: Band, columns: number, on: BandHan
   }
 
   return (
-    <Box flexDirection="row" gap={1}>
-      <Text dimColor>{clip(`⏱ Claude changed ${shown.summary}`, Math.max(10, columns - 34))}</Text>
-      <Button key="tm-undo" variant="primary" hotkey="u" label="Undo turn" onPress={on.undo} />
-      <Button key="tm-review" hotkey="r" label="Review" onPress={on.review} />
-      {close}
+    <Box flexDirection="column">
+      <Box flexDirection="row" gap={1}>
+        <Text dimColor>{clip(`⏱ Claude changed ${shown.summary}`, Math.max(10, columns - 34))}</Text>
+        <Button key="tm-undo" variant="primary" hotkey="u" label="Undo turn" onPress={on.undo} />
+        <Button key="tm-review" hotkey="r" label="Review" onPress={on.review} />
+        {close}
+      </Box>
+      {shown.alert !== null && (
+        <Box flexDirection="row" gap={1}>
+          <Text color="yellow">{clip(`⚠ ${shown.alert}`, Math.max(10, columns - 18))}</Text>
+          <Button key="tm-undo-sensitive" hotkey="x" label="Undo these" onPress={on.undoSensitive} />
+        </Box>
+      )}
     </Box>
   )
 }
@@ -100,8 +110,11 @@ export function paneView(table: Table, data: PaneData, on: PaneHandlers): Render
             {shown.changes
               .slice(0, 30)
               .map((change, i) =>
-                row(`f-${i}`, change.path === shown.file, `${statusMark(change)} ${change.path}`, () =>
-                  on.showFile(change.path),
+                row(
+                  `f-${i}`,
+                  change.path === shown.file,
+                  `${statusMark(change)} ${change.path}${flag(change.path)}`,
+                  () => on.showFile(change.path),
                 ),
               )}
             {shown.changes.length + shown.more > 30 && (
@@ -125,6 +138,10 @@ export function paneView(table: Table, data: PaneData, on: PaneHandlers): Render
       )}
     </Box>
   )
+}
+
+function flag(path: string): string {
+  return kindOfPath(path) === undefined ? '' : '  ⚠'
 }
 
 function diffView(table: Table, diff: string, path: string): RenderElement {

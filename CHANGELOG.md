@@ -6,6 +6,13 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+### Added
+
+- Security diff: after a turn that touched CI config, git hooks, dependencies or an install script, secrets, container
+  or infrastructure config, a new executable or many deleted files, the band says what with **Undo these** (`x`) to
+  revert only that. `/tm show` lists it under "Sensitive" and the pane marks those files.
+- `/tm undo [N] --sensitive`: revert only what the security diff flags in a turn.
+
 ## [0.6.0] - 2026-10-02
 
 ### Added
