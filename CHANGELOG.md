@@ -15,6 +15,7 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 - The band says what a turn did in a sentence: "Claude edited 3 files, created 12 and deleted 4" instead of
   "Claude changed 3 modified · 12 created · 4 deleted".
+- Undo, redo and travel say what they did the same way: "Restored 3 files, removed 12 and brought back 4".
 
 ### Changed
 

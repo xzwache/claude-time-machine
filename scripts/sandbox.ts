@@ -287,13 +287,12 @@ const CHECKS: Check[] = [
   { args: 'show 5', expect: /Move settings to a config file[\s\S]+⚠ secrets\s+\.env {2}not kept, so not undoable/ },
   {
     args: 'undo 3 --sensitive',
-    expect:
-      /Undo the sensitive changes of claude "Add a release pipeline":\n.+Restored 1 modified file\n.+Removed 2 files/,
+    expect: /Undo the sensitive changes of claude "Add a release pipeline":\n.+Restored 1 file and removed 2/,
   },
   { args: 'save "sandbox check"', expect: /Saved checkpoint "sandbox check"/ },
-  { args: 'undo', expect: /Restored 1 modified file\n.+Left alone, changed by someone else since: src\/routes\.ts/ },
-  { args: 'redo', expect: /Redo "Add rate limiting":\n.+Restored 1 modified file/ },
-  { args: 'undo 6.1', expect: /Undo step "Edit src\/login\.ts":\n.+Restored 1 modified file/ },
+  { args: 'undo', expect: /Restored 1 file\n.+Left alone, changed by someone else since: src\/routes\.ts/ },
+  { args: 'redo', expect: /Redo "Add rate limiting":\n.+Restored 1 file$/m },
+  { args: 'undo 6.1', expect: /Undo step "Edit src\/login\.ts":\n.+Restored 1 file$/m },
   { args: 'travel "before refactor"', expect: /Travelled to "before refactor"/ },
   { args: 'log 4', expect: /travel/ },
   { args: 'travel "sandbox check"', expect: /Travelled to "sandbox check"/ },

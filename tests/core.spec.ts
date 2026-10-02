@@ -23,7 +23,7 @@ import type { FileHeat, Heat } from '../src/heat.ts'
 import { heatPage, pageLibrary } from '../src/heat-page.ts'
 import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
 import type { Deps, ExecResult } from '../src/index.ts'
-import { turnSummary } from '../src/format.ts'
+import { restoreText, turnSummary } from '../src/format.ts'
 import { versionProblem } from '../src/version.ts'
 import {
   NOT_KEPT,
@@ -1037,5 +1037,21 @@ describe('the band', () => {
     assert.equal(summary(0, 0, 5), 'Claude deleted 5 files')
     assert.equal(summary(1, 2, 0), 'Claude edited 1 file and created 2')
     assert.equal(summary(0, 0, 0), 'Claude changed only files the time machine leaves out')
+  })
+
+  test('says what an undo did in a sentence', () => {
+    const files = (count: number) => Array.from({ length: count }, (_, i) => `f${i}`)
+    const report = (restored: number, removed: number, recovered: number, unchanged = 0) => ({
+      restored: files(restored),
+      removed: files(removed),
+      recovered: files(recovered),
+      unchanged: files(unchanged),
+      conflicts: [],
+      entry: undefined,
+    })
+    assert.equal(restoreText(report(3, 12, 4), 'abc1234'), '✓ Restored 3 files, removed 12 and brought back 4')
+    assert.equal(restoreText(report(0, 2, 1), 'abc1234'), '✓ Removed 2 files and brought back 1')
+    assert.equal(restoreText(report(1, 0, 0, 2), 'abc1234'), '✓ Restored 1 file\n· 2 files were already back')
+    assert.equal(restoreText(report(0, 0, 0), 'abc1234'), 'Nothing to change: the files are already there.')
   })
 })
