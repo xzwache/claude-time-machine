@@ -44,7 +44,7 @@ must be signed in; the sandbox's history lives next to your projects' and `--cle
 | `src/prune.ts`        | Forgetting old snapshots.                                                   |
 | `src/export.ts`       | `/tm commit` and `/tm branch`: the only writes to the project's repository. |
 | `src/commands.ts`     | `/tm` and its subcommands.                                                  |
-| `src/sensitive.ts`    | The security diff: which changed files deserve a second look.               |
+| `src/sensitive.ts`    | Sensitive changes: which changed files deserve a second look.               |
 | `src/heat.ts`         | `/tm heat`: what the timeline did to each file, as a folder tree.           |
 | `src/treemap.ts`      | Laying the heat map out and painting it.                                    |
 | `src/heat-page.ts`    | The heat map as a self-contained HTML page.                                 |

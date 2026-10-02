@@ -13,6 +13,9 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ### Changed
 
+- The security diff is now called sensitive changes in the docs and `/tm help`: it flags files worth a second look; it
+  is not a security check. The README no longer promises your work is "safe", and says that what `/tm` prints becomes
+  part of the conversation with Claude.
 - The band says what a turn did in a sentence: "Claude edited 3 files, created 12 and deleted 4" instead of
   "Claude changed 3 modified · 12 created · 4 deleted".
 - Undo, redo and travel say what they did the same way: "Restored 3 files, removed 12 and brought back 4".

@@ -8,7 +8,7 @@
 // The history is written by the time machine itself, as Claude Code would:
 // turns of Write, Edit and Bash steps, edits of yours between and during
 // turns, a second session, an interrupted turn, a checkpoint, an undo, and a
-// turn the security diff flags.
+// turn with sensitive changes.
 
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, realpath, rm, unlink, writeFile } from 'node:fs/promises'

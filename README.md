@@ -44,12 +44,13 @@ The time machine snapshots the whole project around every tool call, so:
 
 - **Bash is covered.** Anything a command changed is one undo away.
 - **Step by step.** Undo a whole turn, or just the third command of it.
-- **Your work is safe.** Uncommitted changes you had before the turn stay. Edits you make while Claude works are yours,
+- **Your edits stay yours.** Uncommitted changes you had before the turn stay. Edits you make while Claude works are yours,
   not Claude's; if you both touched a file, undo stops and tells you instead of overwriting.
 - **Nothing is lost.** Every undo, travel and prune is itself a snapshot you can go back from.
 - **Your repo is untouched.** History lives in a separate git repository under `~/.claude/time-machine/`. No commits,
   stashes or branches in your project, unless you ask for them with `/tm commit` or `/tm branch`.
-- **Local and free.** Plain git on your machine. No network, no telemetry, no model calls.
+- **Local and private.** Plain git on your machine. The plugin makes no network requests, sends no telemetry and
+  makes no model calls.
 
 |                                     | `/rewind`                 | Time machine                      |
 | ----------------------------------- | ------------------------- | --------------------------------- |
@@ -121,7 +122,7 @@ The keys work once the band has focus: click it or press ctrl+x tab. `/tm undo` 
 | `/tm log`                       | List snapshots, newest first                                        |
 | `/tm show 3`                    | Files, steps and Claude's answer for snapshot 3                     |
 | `/tm undo` · `/tm undo 3.2`     | Undo the latest turn · undo step 2 of turn 3                        |
-| `/tm undo 3 --sensitive`        | Undo only what the security diff flagged in turn 3                  |
+| `/tm undo 3 --sensitive`        | Undo only the sensitive changes flagged in turn 3                   |
 | `/tm redo`                      | Undo the last undo                                                  |
 | `/tm travel 5`                  | Put the whole project back to snapshot 5                            |
 | `/tm save "before refactor"`    | Bookmark now; `/tm travel "before refactor"` comes back             |
@@ -145,12 +146,16 @@ Details, numbers and trade-offs: [docs/architecture.md](docs/architecture.md).
 
 ## Privacy
 
-Everything stays on your machine. Snapshots contain your project's files, including small ignored files such as local
-config, plus your prompts and Claude's answers. The folder is created with mode `700`.
+The plugin keeps everything on your machine and sends nothing anywhere. Snapshots contain your project's files,
+including small ignored files such as local config, plus your prompts and Claude's answers. The folder is created with
+mode `700`.
+
+What `/tm` commands print (file names, diffs, Claude's earlier answers) becomes part of your conversation with Claude,
+like the output of any command.
 
 Secrets are left out: `.env` files, keys and certificates, `.npmrc`, `.pypirc`, `.netrc`, credentials and kubeconfigs
-are never copied, and undo and travel never write them. When Claude edits one, the security diff says so, but it cannot
-be undone. To keep them in a project's snapshots anyway, so they can be undone: `/tm secrets keep`.
+are never copied, and undo and travel never write them. When Claude edits one, it is flagged as a sensitive change, but
+it cannot be undone. To keep them in a project's snapshots anyway, so they can be undone: `/tm secrets keep`.
 
 To keep paths out, list them in a `.tmignore` file (same syntax as `.gitignore`). To delete a project's history:
 `/tm projects rm N --yes`, or remove its folder under `~/.claude/time-machine/`.

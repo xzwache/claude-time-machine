@@ -69,11 +69,11 @@ export type Details = {
   diff: string
 }
 
-/** What the security diff flags in a turn's changes. */
+/** What kind of sensitive change a turn made. */
 export type FindingKind =
   'ci' | 'hooks' | 'deps' | 'install-script' | 'secrets' | 'container' | 'infra' | 'executable' | 'mass-delete'
 
-/** One flag of the security diff: the paths it is about, and what changed in them. */
+/** One sensitive change: the paths it is about, and what changed in them. */
 export type Finding = {
   kind: FindingKind
   paths: string[]
@@ -85,7 +85,7 @@ export type Finding = {
 export type Band = {
   id: string
   summary: string
-  /** The security diff of the turn, as one line; null when nothing was flagged. */
+  /** The turn's sensitive changes, as one line; null when there were none. */
   alert: string | null
   result: string | null
 }
