@@ -101,7 +101,7 @@ timeline.
 | `/tm redo` | Undoes the latest undo. |
 | `/tm travel N\|name` | Puts every tracked file back to how it was at snapshot N, or at a saved checkpoint. |
 | `/tm save [name]` | Saves the work tree now as a named checkpoint, even if nothing changed. |
-| `/tm on`, `/tm off`, `/tm manual` | Sets this project's mode. `on` snapshots every turn (the default), `off` takes no snapshots, and `manual` snapshots only on `/tm save`. The mode is kept across sessions, and the history stays in every mode. |
+| `/tm on`, `/tm off`, `/tm manual` | Sets this project's mode. `on` snapshots every turn, `off` takes no snapshots, and `manual` snapshots only on `/tm save`. The mode is kept across sessions, and the history stays in every mode. Until you set a mode, a git project is `on` and any other folder is `off`, so starting Claude in `~` or `/tmp` never snapshots everything under it. Your home folder and `/` can never be turned on. |
 | `/tm prune 30d` or `/tm prune 50` | Forgets snapshots older than 30 days, or keeps only the newest 50. The oldest kept state becomes the new baseline. |
 | `/tm commit [N] [message] [--force]` | Commits what turn N changed (default: the latest turn) to your current branch, each file as the turn left it. Your other changes, your work tree and the rest of your index are not touched. Files your repo ignores (such as `.env`) are left out. Refuses during a merge or rebase. Without `--force`, it also refuses if you have staged changes to the same files. |
 | `/tm branch N name` | Creates branch `name` in your repo: a commit on top of `HEAD` with every file as it was at snapshot N. `HEAD`, the index and your files do not change. |

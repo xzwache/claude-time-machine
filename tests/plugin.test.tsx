@@ -37,11 +37,13 @@ function typed(args: string) {
 }
 
 /** Answers every command with success and `answers[argv]` or nothing; records the calls. */
-function fakeHost(on: On, answers: Record<string, string> = {}): string[][] {
+function fakeHost(on: On, given: Record<string, string> = {}, isGit = true, root = '/work/project'): string[][] {
   const calls: string[][] = []
+  const answers: Record<string, string> = { '--is-inside-work-tree': isGit ? 'true\n' : '', ...given }
+  on('fs.exists', () => ({ value: false }))
   mock.env(on, { HOME: '/home/tester' })
   mock.store(on)
-  on('session.root', () => ({ value: '/work/project' }))
+  on('session.root', () => ({ value: root }))
   on('session.id', () => ({ value: 'session-1' }))
   on('fs.write', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
@@ -58,8 +60,9 @@ function fakeHost(on: On, answers: Record<string, string> = {}): string[][] {
 describe('the /tm command', () => {
   test('keeps the shadow repository under ~/.claude/time-machine, never in the project', async ($, on) => {
     const calls = fakeHost(on)
-    const ran = await $.command.run(typed('help'))
-    expect(ran.text).toMatch(/Usage: \/tm/)
+    expect((await $.command.run(typed('help'))).text).toMatch(/Usage: \/tm/)
+    expect(calls.some(argv => argv.includes('init'))).toBe(false)
+    await $.command.run(typed('log'))
     const init = calls.find(argv => argv.includes('init'))
     expect(init?.at(-1)).toMatch(/^\/home\/tester\/\.claude\/time-machine\/[0-9a-f]{16}\.git$/)
   })
@@ -112,6 +115,21 @@ describe('taking snapshots out', () => {
   })
 })
 
+describe('folders that are not git projects', () => {
+  test('stay off until /tm on, and never start a history on their own', async ($, on) => {
+    const calls = fakeHost(on, {}, false)
+    expect((await $.command.run(typed('log'))).text).toMatch(/off here: it starts on its own only in git projects/)
+    expect(calls.some(argv => argv.includes('init'))).toBe(false)
+    expect((await $.command.run(typed('on'))).text).toMatch(/every turn is snapshotted/)
+    expect((await $.command.run(typed('stats'))).text).toMatch(/mode auto/)
+  })
+
+  test('the home folder can never be turned on', async ($, on) => {
+    fakeHost(on, {}, false, '/home/tester')
+    expect((await $.command.run(typed('on'))).text).toMatch(/home folder or the file system root/)
+  })
+})
+
 describe('modes', () => {
   test('/tm off stops snapshots around tool calls, /tm on brings them back', async ($, on) => {
     const calls = fakeHost(on)
@@ -124,7 +142,7 @@ describe('modes', () => {
     }
     expect((await $.command.run(typed('off'))).text).toMatch(/off for this project/)
     expect(await bash()).toBe(0)
-    expect((await $.command.run(typed('stats'))).text).toMatch(/mode off/)
+    expect((await $.command.run(typed('stats'))).text).toMatch(/off here/)
     expect((await $.command.run(typed('on'))).text).toMatch(/every turn is snapshotted/)
     expect(await bash()).toBeGreaterThan(0)
   })

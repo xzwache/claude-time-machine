@@ -18,6 +18,7 @@ const COMMAND = 'tm'
 const PANE = 'time-machine'
 const HISTORY = 40
 const SLOW_SNAPSHOT_MS = 2000
+const SHOWN_FILES = 100
 const DAY_MS = 24 * 60 * 60 * 1000
 
 const entries = atom({ plugin: 'time-machine', key: 'entries' } as const, [] as Entry[])
@@ -28,6 +29,7 @@ const notice = atom({ plugin: 'time-machine', key: 'notice' } as const, '')
 const band = atom({ plugin: 'time-machine', key: 'band' } as const, null as Band | null)
 
 const machines = new Map<string, TimeMachine>()
+const gitProjects = new Map<string, boolean>()
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -36,9 +38,7 @@ export const register: Register = on => {
       description: 'Time machine: review, undo or travel between Claude turns',
       argumentHint: '[log | show N | undo [N] | redo | travel N | save name | on | off | help]',
     })
-    if ((await modeOf($)) === 'off') {
-      $.ui.status('⏱ time machine: off')
-    } else {
+    if ((await modeOf($)) !== 'off') {
       const tm = await machine($)
       void tm
         .init()
@@ -160,8 +160,9 @@ function hostOf($: EngineInterface): Host {
     mode: () => modeOf($),
     setMode: mode => setMode($, mode),
     openPane: () => openPane($, undefined),
-    home: () => home($),
+    home: () => historyHome($),
     exec: depsOf($).exec,
+    hasHistory: async () => $.fs.exists((await machine($)).gitDir),
     forget: root => void machines.delete(root),
     report: error => report($, error),
     writeFile: (path, text) => $.fs.write(path, text),
@@ -189,7 +190,7 @@ async function pruneByRetention($: EngineInterface, tm: TimeMachine): Promise<vo
   }
 }
 
-async function home($: EngineInterface): Promise<string> {
+async function historyHome($: EngineInterface): Promise<string> {
   return `${(await $.env.get('HOME')) ?? '/tmp'}/.claude/time-machine`
 }
 
@@ -198,7 +199,7 @@ async function machine($: EngineInterface): Promise<TimeMachine> {
   const root = await $.session.root()
   const known = machines.get(root)
   if (known) return known.use(depsOf($))
-  const made = new TimeMachine(depsOf($), root, `${await home($)}/${await digest(root)}.git`)
+  const made = new TimeMachine(depsOf($), root, `${await historyHome($)}/${await digest(root)}.git`)
   machines.set(root, made)
   return made
 }
@@ -208,20 +209,49 @@ async function digest(text: string): Promise<string> {
   return [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('').slice(0, 16)
 }
 
-/** The project's mode, kept across sessions; `auto` until set. */
+/**
+ * The project's mode, kept across sessions. Until set, a git project is
+ * `auto` and any other folder `off`: Claude started in a home folder or in
+ * /tmp must not snapshot everything under it.
+ */
 async function modeOf($: EngineInterface): Promise<Mode> {
-  const stored = await $.store.get(`mode:${await digest(await $.session.root())}`)
-  return stored === 'manual' || stored === 'off' ? stored : 'auto'
+  const root = await $.session.root()
+  const stored = await $.store.get(`mode:${await digest(root)}`)
+  if (stored === 'auto' || stored === 'manual' || stored === 'off') return stored
+  return (await isGitProject($, root)) ? 'auto' : 'off'
 }
 
 async function setMode($: EngineInterface, mode: Mode): Promise<void> {
-  await $.store.set(`mode:${await digest(await $.session.root())}`, mode)
+  const root = await $.session.root()
+  if (mode !== 'off' && (await isHomeOrRoot($, root))) {
+    throw new Error(`${root} is your home folder or the file system root; the time machine stays off here`)
+  }
+  await $.store.set(`mode:${await digest(root)}`, mode)
+  $.ui.status(mode === 'auto' ? '⏱ time machine on' : `⏱ time machine: ${mode}`)
+}
+
+async function isHomeOrRoot($: EngineInterface, root: string): Promise<boolean> {
+  const home = ((await $.env.get('HOME')) ?? '').replace(/\/+$/, '')
+  return root === '/' || root === home
+}
+
+/** Whether the root is inside a git work tree (and not the home folder). */
+async function isGitProject($: EngineInterface, root: string): Promise<boolean> {
+  const known = gitProjects.get(root)
+  if (known !== undefined) return known
+  const isGit =
+    !(await isHomeOrRoot($, root)) &&
+    (await $.process.run(['git', 'rev-parse', '--is-inside-work-tree'], { cwd: root })).stdout.trim() === 'true'
+  gitProjects.set(root, isGit)
+  return isGit
 }
 
 /** Re-reads the timeline into the pane's state and the status line. */
 async function refresh($: EngineInterface, tm: TimeMachine): Promise<Entry[]> {
   const list = await tm.history(HISTORY)
-  await update($, entries, () => list)
+  // File lists stay out of the state (it has a size limit); the pane reads
+  // one entry's files when it is selected.
+  await update($, entries, () => list.map(entry => ({ ...entry, changes: [] })))
   const mode = await modeOf($)
   const turns = list.filter(entry => entry.kind === 'turn').length
   $.ui.status(mode === 'auto' ? `⏱ ${plural(turns, 'turn')} on the timeline` : `⏱ time machine: ${mode}`)
@@ -272,16 +302,18 @@ async function select($: EngineInterface, id: string): Promise<void> {
   const tm = await machine($)
   const entry = await tm.entry(id)
   const steps = entry?.kind === 'turn' ? await tm.steps(id) : []
-  await update($, details, () => ({ id, steps, changes: [], file: null, diff: '' }))
+  await update($, details, () => ({ id, steps, changes: [], more: 0, file: null, diff: '' }))
   await showStep($, id)
 }
 
 async function showStep($: EngineInterface, id: string): Promise<void> {
   const tm = await machine($)
-  const changes = await tm.changes(id)
+  const all = await tm.changes(id)
+  const changes = all.slice(0, SHOWN_FILES)
+  const more = all.length - changes.length
   const file = changes[0]?.path ?? null
   const diff = file === null ? '' : await tm.fileDiff(id, file)
-  await update($, details, shown => (shown ? { ...shown, id, changes, file, diff } : shown))
+  await update($, details, shown => (shown ? { ...shown, id, changes, more, file, diff } : shown))
 }
 
 async function showFile($: EngineInterface, path: string): Promise<void> {
