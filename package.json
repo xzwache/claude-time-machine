@@ -13,6 +13,7 @@
     "test:mod": "claude plugin test .",
     "validate": "claude plugin validate .",
     "typecheck": "tsc -p .",
-    "bench": "node scripts/bench.ts"
+    "bench": "node scripts/bench.ts",
+    "types": "claude -p --plugin-dir . \"/tm help\""
   }
 }

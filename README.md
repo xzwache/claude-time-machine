@@ -257,7 +257,8 @@ delete all of it, run `rm -rf ~/.claude/time-machine`.
 npm test            # tests/*.spec.ts: real git in temp dirs, the read-only check (Node 22.18+)
 npm run test:mod    # tests/plugin.test.tsx: the mod inside Claude Code's test engine
 npm run validate    # claude plugin validate .
-npm run typecheck   # tsc; needs .claude-plugin/types, which validate and test lay
+npm run types       # loads the mod once, which lays .claude-plugin/types (no credentials needed)
+npm run typecheck   # tsc against those types
 npm run bench -- <project> <file>   # snapshot costs on a real project
 ```
 

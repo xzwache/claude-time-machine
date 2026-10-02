@@ -20,6 +20,9 @@ jobs:
         run: claude plugin validate . --strict
       - name: Mod tests in Claude Code's test engine
         run: claude plugin test .
-      # plugin validate/test lay .claude-plugin/types, which the typecheck reads.
+      # Loading the mod lays .claude-plugin/types, which the typecheck reads.
+      # A mod command answers locally, so this needs no credentials.
+      - name: Load the mod (lays its types)
+        run: npm run types
       - name: Typecheck
         run: tsc -p .
