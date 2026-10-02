@@ -8,8 +8,8 @@ import { join } from 'node:path'
 import { after, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { TimeMachine, deleteProject, listProjects } from '../hooks/core.ts'
-import type { Deps, ExecResult } from '../hooks/core.ts'
+import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
+import type { Deps, ExecResult } from '../src/index.ts'
 
 const deps: Deps = {
   exec: (argv, init) =>

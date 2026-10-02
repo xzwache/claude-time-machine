@@ -2,7 +2,7 @@
 // and /tm output.
 
 import type { Change, Entry, Project } from '../types'
-import type { RestoreReport } from './core.ts'
+import type { RestoreReport } from './index.ts'
 
 const DIFF_LIMIT = 9000
 const DAY_MS = 24 * 60 * 60 * 1000

@@ -7,8 +7,8 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { TimeMachine } from '../hooks/core.ts'
-import type { Deps, ExecResult } from '../hooks/core.ts'
+import { TimeMachine } from '../src/index.ts'
+import type { Deps, ExecResult } from '../src/index.ts'
 
 const deps: Deps = {
   exec: (argv, init) =>

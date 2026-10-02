@@ -1,8 +1,8 @@
 // `/tm` and its subcommands. What they need from the session comes in as a
 // Host of plain functions, which register.tsx builds.
 
-import type { Exec, TimeMachine } from './core.ts'
-import { deleteProject, listProjects } from './core.ts'
+import type { Exec, TimeMachine } from './index.ts'
+import { deleteProject, listProjects } from './index.ts'
 import { clip, countsShort, kindLabel, logText, oneLine, plural, projectLine, restoreText, size, statusMark, stepLabel } from './format.ts'
 import type { Entry, Mode } from '../types'
 

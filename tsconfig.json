@@ -19,6 +19,7 @@
   "include": [
     ".claude-plugin/types",
     "hooks",
+    "src",
     "types",
     "tests/*.test.tsx"
   ]
