@@ -6,7 +6,9 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
-### Changed
+## [0.7.1] - 2026-10-02
+
+### Security
 
 - Secrets are left out of snapshots: `.env` files (not `.env.example`), keys and certificates, `.npmrc`, `.pypirc`,
   `.netrc`, credentials and kubeconfigs are never copied, and undo and travel never write them, even from an older
@@ -112,7 +114,8 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 - First release: a snapshot before and after every turn in a shadow git repository, `/tm` pane, `/tm undo`,
   `/tm redo`, `/tm travel`, `/tm log`.
 
-[Unreleased]: https://github.com/xzwache/claude-time-machine/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/xzwache/claude-time-machine/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/xzwache/claude-time-machine/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xzwache/claude-time-machine/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/xzwache/claude-time-machine/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/xzwache/claude-time-machine/releases/tag/v0.5.0
