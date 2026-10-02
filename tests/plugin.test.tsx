@@ -186,6 +186,42 @@ describe('the band above the prompt', () => {
   })
 })
 
+describe('the security diff in the band', () => {
+  const PROPS = {
+    hasSurvey: false,
+    isWorking: false,
+    maxRows: 3,
+    bodyColumns: 100,
+    scroll: { offset: 0, bodyRows: 3 },
+    view: {},
+  }
+  const withBand = (on: On, band: Record<string, unknown>) =>
+    on('state.get', (_, e, next) =>
+      e.plugin === 'time-machine' && e.key === 'band' ? { value: { value: band, version: 1 } } : next(e),
+    )
+
+  test('shows what was flagged and a button to undo only that, on every surface', async ($, on) => {
+    fakeHost(on)
+    withBand(on, { id: ID, summary: '2 modified', alert: 'CI config · deps +left-pad', result: null })
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ plugin: 'time-machine', component: 'AbovePrompt', surface, props: PROPS })
+      expect(await ui.find({ type: 'Text', text: '⚠ CI config · deps +left-pad' })).toBeDefined()
+      expect(await ui.find({ key: 'tm-undo-sensitive' })).toBeDefined()
+      expect(await ui.find({ key: 'tm-undo' })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('keeps to one row when nothing was flagged', async ($, on) => {
+    fakeHost(on)
+    withBand(on, { id: ID, summary: '2 modified', alert: null, result: null })
+    const ui = await $.ui.mount({ plugin: 'time-machine', component: 'AbovePrompt', surface: 'terminal', props: PROPS })
+    expect(await ui.find({ key: 'tm-undo' })).toBeDefined()
+    expect(await ui.find({ key: 'tm-undo-sensitive' })).toBeUndefined()
+    await ui.unmount()
+  })
+})
+
 describe('the pane', () => {
   test('draws an empty timeline on every surface', async ($, on) => {
     fakeHost(on)

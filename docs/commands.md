@@ -46,9 +46,31 @@ thousands of files) is left out. The page uses no network and no model calls.
 | Command                       | What it does                                                                                                                                                                      |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/tm undo [N\|N.k] [--force]` | Reverts turn N, or step k of it. Without an argument, the latest turn. Files changed by someone else since are left alone and listed; `--force` overwrites them (still undoable). |
+| `/tm undo [N] --sensitive`    | Reverts only the files the security diff flags in turn N, and leaves the rest of the turn as it is.                                                                               |
 | `/tm redo`                    | Reverts the latest undo.                                                                                                                                                          |
 | `/tm travel N\|name`          | Puts every file back to how it was at snapshot N or a saved checkpoint.                                                                                                           |
 | `/tm save [name]`             | Saves the project as it is now under a name.                                                                                                                                      |
+
+## Security diff
+
+After every turn, the files Claude changed are checked for what deserves a second look. It is judged on what landed on
+disk, so a change made through Bash counts like one made by Edit. The band names what it found and offers **Undo
+these** (`x`); `/tm show N` lists it under "Sensitive", and the pane marks those files with `⚠`.
+
+| Flag             | When                                                                                                                  |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
+| CI config        | `.github/workflows`, `.github/actions`, GitLab, CircleCI, Buildkite, Azure, Bitbucket, Travis, Drone, a `Jenkinsfile` |
+| git hooks        | `.husky/`, `.githooks/`, `.pre-commit-config.yaml`, `lefthook.yml`                                                    |
+| dependencies     | Dependencies added, removed or changed in a `package.json`; any change to a lockfile or another ecosystem's manifest  |
+| install script   | A `preinstall`, `install`, `postinstall`, `prepare` or other lifecycle script added or changed in a `package.json`    |
+| secrets          | `.env` files (not `.env.example`), keys and certificates, `.npmrc`, `.pypirc`, `.netrc`, credentials, a kubeconfig    |
+| container config | Dockerfiles, Containerfiles, compose files                                                                            |
+| infrastructure   | Terraform files, YAML under `k8s/`, `kubernetes/`, `helm/` or `deploy/`                                               |
+| new executable   | A file that became executable, unless one of the flags above already covers it                                        |
+| files deleted    | 20 or more files deleted in one turn                                                                                  |
+
+A version bump in `package.json` alone is not flagged. The flags point at changes worth reading; they do not say the
+change is wrong, and a change the rules do not know about is not flagged.
 
 ## Taking work out
 

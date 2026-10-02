@@ -19,6 +19,7 @@ import {
 import { METRICS, heatText, heatTree } from './heat.ts'
 import type { Heat } from './heat.ts'
 import { heatPage } from './heat-page.ts'
+import { findingLines } from './sensitive.ts'
 import type { Entry, HeatMetric, Mode } from '../types'
 
 export type Host = {
@@ -52,6 +53,7 @@ export const HELP = [
   '  log [N] [--session]       list snapshots, newest first',
   '  show N                    files, steps and answer of snapshot N',
   '  undo [N|N.k] [--force]    revert a turn (default: the latest) or one of its steps',
+  '  undo [N] --sensitive      revert only what the security diff flags in it',
   '  redo                      undo the latest undo',
   '  travel N|name             put every file back to snapshot N or a saved checkpoint',
   '  save [name]               save the work tree now as a named checkpoint',
@@ -118,7 +120,13 @@ export async function runCommand(host: Host, args: string): Promise<string> {
       case 'undo': {
         const entry = arg ? await resolveRef(tm, list, arg) : list.find(one => one.kind === 'turn')
         if (!entry) return 'No Claude turn to undo yet.'
-        const done = await tm.undo(entry.id, flags.has('--force'))
+        const isForced = flags.has('--force')
+        if (flags.has('--sensitive')) {
+          const done = await tm.undoSensitive(entry.id, isForced)
+          if (!done) return `Nothing in ${kindLabel(entry)} "${entry.title}" is flagged as sensitive.`
+          return `Undo the sensitive changes of ${kindLabel(entry)} "${entry.title}":\n${restoreText(done, entry.id)}`
+        }
+        const done = await tm.undo(entry.id, isForced)
         return `Undo ${kindLabel(entry)} "${entry.title}":\n${restoreText(done, entry.id)}`
       }
       case 'redo': {
@@ -189,12 +197,14 @@ export async function runCommand(host: Host, args: string): Promise<string> {
 
 async function showText(tm: TimeMachine, entry: Entry, number: string): Promise<string> {
   const steps = entry.kind === 'turn' ? await tm.steps(entry.id) : []
+  const findings = entry.kind === 'turn' || entry.kind === 'step' ? await tm.findings(entry.id) : []
   return [
     `${kindLabel(entry)} · ${entry.title} (${entry.id.slice(0, 7)})`,
     ...entry.changes.map(change => `  ${statusMark(change)} ${change.path}`),
     ...(steps.length > 0
       ? ['Steps:', ...steps.map((step, i) => `  ${number}.${i + 1} ${stepLabel(step)}  ${countsShort(step)}`)]
       : []),
+    ...(findings.length > 0 ? ['Sensitive:', ...findingLines(findings)] : []),
     ...(entry.answer !== '' ? ['Answer:', `  ${clip(oneLine(entry.answer), 400)}`] : []),
   ].join('\n')
 }

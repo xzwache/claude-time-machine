@@ -67,10 +67,24 @@ export type Details = {
   diff: string
 }
 
+/** What the security diff flags in a turn's changes. */
+export type FindingKind =
+  'ci' | 'hooks' | 'deps' | 'install-script' | 'secrets' | 'container' | 'infra' | 'executable' | 'mass-delete'
+
+/** One flag of the security diff: the paths it is about, and what changed in them. */
+export type Finding = {
+  kind: FindingKind
+  paths: string[]
+  /** `+left-pad`, `react 18→19`, `postinstall: node setup.js`; empty when the path says it all. */
+  items: string[]
+}
+
 /** The band above the prompt after a turn that changed files. */
 export type Band = {
   id: string
   summary: string
+  /** The security diff of the turn, as one line; null when nothing was flagged. */
+  alert: string | null
   result: string | null
 }
 

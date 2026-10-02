@@ -21,17 +21,20 @@ export type RestoreReport = {
 
 /**
  * Reverts what `entry` changed and leaves everything else as it is now. For
- * a turn, that is what Claude's steps changed. A file changed again since is
- * a conflict and stays as it is, unless `isForced`.
+ * a turn, that is what Claude's steps changed; `only` narrows it to those
+ * paths. A file changed again since is a conflict and stays as it is, unless
+ * `isForced`.
  */
 export async function undo(
   shadow: ShadowRepo,
   history: History,
   entry: Entry,
   isForced: boolean,
+  only?: ReadonlySet<string>,
 ): Promise<RestoreReport> {
   if (!entry.parent) throw new Error('The baseline has nothing before it to go back to')
-  const plans = await history.plan(entry)
+  const all = await history.plan(entry)
+  const plans = only === undefined ? all : all.filter(plan => only.has(plan.path))
   const current = await recordCurrent(shadow)
   const changedSince = await changedAgainst(shadow, plans, plan => plan.after, current.tree)
   const differsFromBefore = await changedAgainst(shadow, plans, plan => plan.before, current.tree)

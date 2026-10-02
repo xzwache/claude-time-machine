@@ -10,7 +10,7 @@
 // tests, so it depends only on the two functions it is given. Every public
 // call is serialized: hooks fire concurrently, git's index cannot.
 
-import type { Change, Entry } from '../types'
+import type { Change, Entry, Finding } from '../types'
 import { branchSnapshot, commitPaths } from './export.ts'
 import type { BranchReport, CommitReport } from './export.ts'
 import { chunks, diskUsage } from './git.ts'
@@ -25,6 +25,7 @@ import type { PendingTurn } from './pending.ts'
 import { prune } from './prune.ts'
 import type { PruneOptions, PruneReport } from './prune.ts'
 import { travel, undo } from './restore.ts'
+import { findingPaths, findingsOf } from './sensitive.ts'
 import type { RestoreReport } from './restore.ts'
 import { ShadowRepo, TIMELINE } from './shadow.ts'
 
@@ -207,6 +208,21 @@ export class TimeMachine {
 
   undo(ref: string, isForced = false): Promise<RestoreReport> {
     return this.serial(async () => undo(this.shadow, this.log, await this.required(ref), isForced))
+  }
+
+  /** What the security diff flags among the paths an entry changed. */
+  findings(ref: string): Promise<Finding[]> {
+    return this.serial(async () => findingsOf(this.shadow, await this.log.plan(await this.required(ref))))
+  }
+
+  /** Undoes only the paths the security diff flags; undefined when it flags none. */
+  undoSensitive(ref: string, isForced = false): Promise<RestoreReport | undefined> {
+    return this.serial(async () => {
+      const entry = await this.required(ref)
+      const paths = findingPaths(await findingsOf(this.shadow, await this.log.plan(entry)))
+      if (paths.length === 0) return undefined
+      return undo(this.shadow, this.log, entry, isForced, new Set(paths))
+    })
   }
 
   travel(ref: string): Promise<RestoreReport> {
