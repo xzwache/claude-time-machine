@@ -230,9 +230,10 @@ describe('the security diff in the band', () => {
 
   test('shows what was flagged and a button to undo only that, on every surface', async ($, on) => {
     fakeHost(on)
-    withBand(on, { id: ID, summary: '2 modified', alert: 'CI config · deps +left-pad', result: null })
+    withBand(on, { id: ID, summary: 'Claude edited 2 files', alert: 'CI config · deps +left-pad', result: null })
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ plugin: 'time-machine', component: 'AbovePrompt', surface, props: PROPS })
+      expect(await ui.find({ type: 'Text', text: '⏱ Claude edited 2 files' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: '⚠ CI config · deps +left-pad' })).toBeDefined()
       expect(await ui.find({ key: 'tm-undo-sensitive' })).toBeDefined()
       expect(await ui.find({ key: 'tm-undo' })).toBeDefined()
@@ -242,7 +243,7 @@ describe('the security diff in the band', () => {
 
   test('keeps to one row when nothing was flagged', async ($, on) => {
     fakeHost(on)
-    withBand(on, { id: ID, summary: '2 modified', alert: null, result: null })
+    withBand(on, { id: ID, summary: 'Claude edited 2 files', alert: null, result: null })
     const ui = await $.ui.mount({ plugin: 'time-machine', component: 'AbovePrompt', surface: 'terminal', props: PROPS })
     expect(await ui.find({ key: 'tm-undo' })).toBeDefined()
     expect(await ui.find({ key: 'tm-undo-sensitive' })).toBeUndefined()

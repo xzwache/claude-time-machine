@@ -35,7 +35,7 @@ export function bandView(table: Table, shown: Band, columns: number, on: BandHan
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" gap={1}>
-        <Text dimColor>{clip(`⏱ Claude changed ${shown.summary}`, Math.max(10, columns - 50))}</Text>
+        <Text dimColor>{clip(`⏱ ${shown.summary}`, Math.max(10, columns - 50))}</Text>
         <Button key="tm-undo" variant="primary" hotkey="u" label="Undo turn" onPress={on.undo} />
         <Button key="tm-review" hotkey="r" label="Review" onPress={on.review} />
         {close}

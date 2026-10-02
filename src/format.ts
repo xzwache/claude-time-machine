@@ -45,10 +45,21 @@ export function countsShort(entry: Entry): string {
   return [added && `+${added}`, modified && `~${modified}`, deleted && `-${deleted}`].filter(Boolean).join(' ')
 }
 
-export function countsText(entry: Entry): string {
+/** `Claude edited 3 files, created 12 and deleted 4`: what a turn did, as the band says it. */
+export function turnSummary(entry: Entry): string {
   const { added, modified, deleted } = entry.counts
-  const parts = [modified && `${modified} modified`, added && `${added} created`, deleted && `${deleted} deleted`]
-  return parts.filter(Boolean).join(' · ') || 'no files'
+  const done = (
+    [
+      ['edited', modified],
+      ['created', added],
+      ['deleted', deleted],
+    ] as const
+  ).filter(([, count]) => count > 0)
+  if (done.length === 0) return 'Claude changed only files the time machine leaves out'
+  const [verb, count] = done[0] ?? ['changed', 0]
+  const parts = [`${verb} ${plural(count, 'file')}`, ...done.slice(1).map(([word, n]) => `${word} ${n}`)]
+  const last = parts.pop()
+  return `Claude ${parts.length > 0 ? `${parts.join(', ')} and ${last}` : last}`
 }
 
 export function statusMark(change: Change): string {

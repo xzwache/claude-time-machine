@@ -23,6 +23,7 @@ import type { FileHeat, Heat } from '../src/heat.ts'
 import { heatPage, pageLibrary } from '../src/heat-page.ts'
 import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
 import type { Deps, ExecResult } from '../src/index.ts'
+import { turnSummary } from '../src/format.ts'
 import { versionProblem } from '../src/version.ts'
 import {
   NOT_KEPT,
@@ -1022,5 +1023,19 @@ describe('the Claude Code version', () => {
       versionProblem(undefined) ?? '',
       /needs Claude Code 2\.1\.287 or newer\. Update it with: claude update/,
     )
+  })
+})
+
+describe('the band', () => {
+  const summary = (modified: number, added: number, deleted: number) =>
+    turnSummary({ counts: { added, modified, deleted } } as Parameters<typeof turnSummary>[0])
+
+  test('says what a turn did in a sentence', () => {
+    assert.equal(summary(3, 12, 4), 'Claude edited 3 files, created 12 and deleted 4')
+    assert.equal(summary(2, 0, 1), 'Claude edited 2 files and deleted 1')
+    assert.equal(summary(0, 1, 0), 'Claude created 1 file')
+    assert.equal(summary(0, 0, 5), 'Claude deleted 5 files')
+    assert.equal(summary(1, 2, 0), 'Claude edited 1 file and created 2')
+    assert.equal(summary(0, 0, 0), 'Claude changed only files the time machine leaves out')
   })
 })

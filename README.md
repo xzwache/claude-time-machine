@@ -15,7 +15,7 @@
 <!-- demo.gif: a turn, the band, pressing u, the files coming back -->
 
 ```
-⏱ Claude changed 2 modified · 1 deleted   [ Undo turn ]  [ Review ]  ×
+⏱ Claude edited 2 files and deleted 1   [ Undo turn ]  [ Review ]  ×
 
 > /tm show 1
 claude · add login form (19a9e6f)
@@ -102,7 +102,7 @@ turn touched something that deserves a second look (CI config, dependencies or a
 executable, a mass delete), a second line says what, with **Undo these** (`x`) to revert only that:
 
 ```
-⏱ Claude changed 2 modified · 2 created          [ Undo turn ]  [ Review ]  ×
+⏱ Claude edited 2 files and created 2           [ Undo turn ]  [ Review ]  ×
 ⚠ CI config · deps +left-pad · install script    [ Undo these ]
 ```
 

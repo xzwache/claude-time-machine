@@ -10,7 +10,7 @@ import { runCommand, writeHeatPage } from '../src/commands.ts'
 import type { Host } from '../src/commands.ts'
 import { TimeMachine } from '../src/index.ts'
 import type { Deps } from '../src/index.ts'
-import { countsText, plural, summaryLine } from '../src/format.ts'
+import { plural, summaryLine, turnSummary } from '../src/format.ts'
 import { versionProblem } from '../src/version.ts'
 import { alertLine } from '../src/sensitive.ts'
 import { heatTree, turnsOf, viewOf } from '../src/heat.ts'
@@ -94,7 +94,7 @@ export const register: Register = on => {
           return []
         })
         const alert = findings.length > 0 ? alertLine(findings) : null
-        await update($, band, () => ({ id: entry.id, summary: countsText(entry), alert, result: null }))
+        await update($, band, () => ({ id: entry.id, summary: turnSummary(entry), alert, result: null }))
         await refresh($, tm)
       }
       void tm.maintain().catch(error => report($, error))
