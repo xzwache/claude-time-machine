@@ -11,6 +11,8 @@ import type { Host } from '../src/commands.ts'
 import { TimeMachine } from '../src/index.ts'
 import type { Deps } from '../src/index.ts'
 import { countsText, plural, summaryLine } from '../src/format.ts'
+import { BLOCKED, checkCommand, isGuardRule } from '../src/guard.ts'
+import type { Guard, GuardPlace, GuardRule } from '../src/guard.ts'
 import { alertLine } from '../src/sensitive.ts'
 import { heatTree, turnsOf, viewOf } from '../src/heat.ts'
 import type { Heat } from '../src/heat.ts'
@@ -129,6 +131,29 @@ export const register: Register = on => {
     return result
   })
 
+  on('tool.check', { tool: 'Bash' }, async ($, e, next) => {
+    const verdict = await next(e)
+    const command = (e.input as { command?: unknown } | null)?.command
+    if (verdict.decision === 'deny' || typeof command !== 'string') return verdict
+    const guard = await guardOf($)
+    if (guard.mode === 'off') return verdict
+    const hits = checkCommand(command, await placeOf($)).filter(hit => !guard.allowed.includes(hit.rule))
+    const [first] = hits
+    if (first === undefined) return verdict
+    const reasons = hits.map(hit => hit.reason).join('; ')
+    if (guard.mode === 'warn') {
+      if (e.tool_use_id !== undefined) $.ui.toast(`⚠ Time machine guard: this command ${reasons}.`)
+      return verdict
+    }
+    if (BLOCKED.has(first.rule)) {
+      return {
+        decision: 'deny',
+        reason: `Time machine guard: this command ${reasons}. Not run; the person can run it themselves.`,
+      }
+    }
+    return { decision: 'ask', reason: `⚠ Time machine guard: this command ${reasons}. Undo cannot take that back.` }
+  })
+
   on('command.run', { command: COMMAND }, async ($, e) => ({ text: await runCommand(hostOf($), e.args) }))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -209,6 +234,13 @@ function hostOf($: EngineInterface): Host {
     },
     setRetention: async days => $.store.set(`retain:${await digest(await $.session.root())}`, days),
     showHeat: (read, from, metric) => showHeat($, read, from, metric),
+    guard: () => guardOf($),
+    setGuard: async guard => {
+      const id = await digest(await $.session.root())
+      await $.store.set(`guard:${id}`, guard.mode)
+      await $.store.set(`guard-allow:${id}`, guard.allowed)
+    },
+    place: () => placeOf($),
     isKeepingSecrets: async () => (await $.store.get(`secrets:${await digest(await $.session.root())}`)) === 'keep',
     setKeepingSecrets: async isKeeping => {
       const key = `secrets:${await digest(await $.session.root())}`
@@ -218,6 +250,23 @@ function hostOf($: EngineInterface): Host {
     },
     openFile: path => openFile($, path),
   }
+}
+
+async function guardOf($: EngineInterface): Promise<Guard> {
+  const id = await digest(await $.session.root())
+  const mode = await $.store.get(`guard:${id}`)
+  const allowed = await $.store.get(`guard-allow:${id}`)
+  return {
+    mode: mode === 'warn' || mode === 'off' ? mode : 'ask',
+    allowed: Array.isArray(allowed) ? allowed.filter((rule): rule is GuardRule => isGuardRule(rule)) : [],
+  }
+}
+
+/** Where the guard judges paths from: the project, the home folder, the temporary folders. */
+async function placeOf($: EngineInterface): Promise<GuardPlace> {
+  const home = (await $.env.get('HOME')) || '/nonexistent'
+  const temp = ['/tmp', '/private/tmp', '/var/folders', (await $.env.get('TMPDIR')) ?? ''].filter(Boolean)
+  return { root: await $.session.root(), home: home.replace(/\/+$/, ''), temp }
 }
 
 async function showHeat($: EngineInterface, read: Heat, from: number | null, metric: HeatMetric): Promise<boolean> {

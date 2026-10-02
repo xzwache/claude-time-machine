@@ -19,6 +19,8 @@ import {
 import { METRICS, heatText, heatTree } from './heat.ts'
 import type { Heat } from './heat.ts'
 import { heatPage } from './heat-page.ts'
+import { BLOCKED, GUARD_RULES, checkCommand, isGuardRule } from './guard.ts'
+import type { Guard, GuardMode, GuardPlace, GuardRule } from './guard.ts'
 import { findingLines } from './sensitive.ts'
 import type { Entry, HeatMetric, Mode } from '../types'
 
@@ -42,6 +44,10 @@ export type Host = {
   showHeat: (heat: Heat, from: number | null, metric: HeatMetric) => Promise<boolean>
   /** Opens a local file with the system's default app; false when it could not. */
   openFile: (path: string) => Promise<boolean>
+  guard: () => Promise<Guard>
+  setGuard: (guard: Guard) => Promise<void>
+  /** The project, home and temporary folders the guard judges paths from. */
+  place: () => Promise<GuardPlace>
   isKeepingSecrets: () => Promise<boolean>
   setKeepingSecrets: (isKeeping: boolean) => Promise<void>
 }
@@ -63,6 +69,9 @@ export const HELP = [
   '  commit [N] [message] [--force]  commit what turn N changed to your current branch',
   '  branch N name             a new branch in your repo holding snapshot N',
   '  patch [N]                 turn N as a patch file (also copied to the clipboard)',
+  '  guard [ask | warn | off]  ask before commands undo cannot take back (the default), only warn, or stop',
+  '  guard allow RULE | reset  stop asking about one rule here, or about none again',
+  '  guard check COMMAND       what the guard would say about a command',
   '  secrets [keep | skip]     keep .env files and keys in snapshots, or leave them out (the default)',
   '  retain 30d | off          prune snapshots older than that, once a day',
   '  prune 30d | prune 50      forget old snapshots (by age, or keep the newest N)',
@@ -100,6 +109,8 @@ export async function runCommand(host: Host, args: string): Promise<string> {
         return await projectsCommand(host, await host.machine(), rest, flags)
       case 'secrets':
         return await secretsCommand(host, arg)
+      case 'guard':
+        return await guardCommand(host, rest)
       case 'help':
         return HELP
     }
@@ -245,6 +256,59 @@ export async function writeHeatPage(host: Host, tm: TimeMachine, heat: Heat): Pr
   })
   await host.writeFile(path, page)
   return path
+}
+
+async function guardCommand(host: Host, rest: string[]): Promise<string> {
+  const [verb, ...words] = rest
+  const guard = await host.guard()
+  if (verb === 'ask' || verb === 'warn' || verb === 'off') {
+    await host.setGuard({ ...guard, mode: verb })
+    return GUARD_MODES[verb]
+  }
+  if (verb === 'allow') {
+    const rule = words[0]
+    if (!isGuardRule(rule)) return `Name a rule to allow: ${ruleNames()}.`
+    if (BLOCKED.has(rule)) return `${rule} is always refused: run such a command yourself if you mean it.`
+    if (!guard.allowed.includes(rule)) await host.setGuard({ ...guard, allowed: [...guard.allowed, rule] })
+    return `In this project, the guard no longer asks when a command ${GUARD_RULES[rule]}. /tm guard reset asks again.`
+  }
+  if (verb === 'reset') {
+    await host.setGuard({ ...guard, allowed: [] })
+    return 'The guard asks about every rule again in this project.'
+  }
+  if (verb === 'check') {
+    const command = words.join(' ').replace(/^["']|["']$/g, '')
+    if (command === '') return 'Usage: /tm guard check git push --force'
+    const hits = checkCommand(command, await host.place())
+    if (hits.length === 0) return 'Nothing to stop: undo covers what this command changes, if anything.'
+    return hits
+      .map(hit => {
+        const action = BLOCKED.has(hit.rule)
+          ? 'refused'
+          : guard.allowed.includes(hit.rule)
+            ? 'allowed here'
+            : guard.mode
+        return `⚠ ${hit.rule} (${action}): ${hit.reason}`
+      })
+      .join('\n')
+  }
+  return [
+    `Command guard: ${guard.mode}. ${GUARD_MODES[guard.mode]}`,
+    `Allowed here: ${guard.allowed.length > 0 ? guard.allowed.join(', ') : 'none'}`,
+    `Rules: ${ruleNames()}`,
+  ].join('\n')
+}
+
+const GUARD_MODES: Record<GuardMode, string> = {
+  ask: 'Before a command that undo cannot take back, Claude Code asks you first; the worst are refused.',
+  warn: 'Commands that undo cannot take back run without asking; a toast says what they do.',
+  off: 'The guard stays out of the way: no questions, no warnings.',
+}
+
+function ruleNames(): string {
+  return Object.keys(GUARD_RULES)
+    .map(rule => (BLOCKED.has(rule as GuardRule) ? `${rule} (always refused)` : rule))
+    .join(', ')
 }
 
 async function secretsCommand(host: Host, arg: string | undefined): Promise<string> {

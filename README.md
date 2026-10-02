@@ -78,6 +78,12 @@ executable, a mass delete), a second line says what, with **Undo these** (`x`) t
 ⚠ CI config · deps +left-pad · install script    [ Undo these ]
 ```
 
+Some commands reach past what undo can bring back: a force push, a delete outside the project, a script piped from the
+network into a shell, a publish, a change to cloud infrastructure or a database. Before Claude runs one, the **command
+guard** has Claude Code ask you first, even where your permissions would let it run; deleting `/` or your home folder,
+or writing to a disk device, is refused. A command that only changes the project's files is left alone: undo covers it.
+`/tm guard check <command>` says what it would do; `/tm guard warn` or `off` tones it down.
+
 | Command                         | What it does                                                        |
 | ------------------------------- | ------------------------------------------------------------------- |
 | `/tm`                           | Open the pane: timeline, steps, files and diffs                     |
@@ -90,6 +96,7 @@ executable, a mass delete), a second line says what, with **Undo these** (`x`) t
 | `/tm save "before refactor"`    | Bookmark now; `/tm travel "before refactor"` comes back             |
 | `/tm commit` · `/tm branch 3 x` | Turn a turn into a commit on your branch · snapshot 3 into branch x |
 | `/tm patch`                     | The latest turn as a patch file                                     |
+| `/tm guard check git push -f`   | What the command guard would say about a command                    |
 | `/tm heat` · `/tm heat open`    | Map of where Claude worked · the same map in your browser           |
 
 All commands, modes and settings: [docs/commands.md](docs/commands.md).
