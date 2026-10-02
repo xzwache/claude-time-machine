@@ -284,6 +284,7 @@ const CHECKS: Check[] = [
     expect:
       /Sensitive:\n\s+⚠ CI config\s+\.github\/workflows\/release\.yml\n\s+⚠ dependencies\s+package\.json {2}\+left-pad\n\s+⚠ install script\s+package\.json {2}postinstall: node scripts\/fetch-binaries\.js\n\s+⚠ new executable\s+scripts\/release\.sh/,
   },
+  { args: 'show 5', expect: /Move settings to a config file[\s\S]+⚠ secrets\s+\.env {2}not kept, so not undoable/ },
   {
     args: 'undo 3 --sensitive',
     expect:
@@ -298,6 +299,9 @@ const CHECKS: Check[] = [
   { args: 'travel "sandbox check"', expect: /Travelled to "sandbox check"/ },
   { args: 'commit', expect: /Committed \d+ files? to main/ },
   { args: 'branch 3 sandbox-snapshot', expect: /Created branch sandbox-snapshot/ },
+  { args: 'secrets', expect: /left out of this project's snapshots/ },
+  { args: 'secrets keep', expect: /kept in this project's snapshots from now on/ },
+  { args: 'secrets skip', expect: /left out of new snapshots/ },
   { args: 'retain 30d', expect: /pruned once a day/ },
   { args: 'retain off', expect: /Automatic pruning off/ },
   { args: 'prune 500', expect: /Nothing to prune|Pruned/ },

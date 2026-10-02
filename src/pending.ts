@@ -3,7 +3,15 @@
 
 import type { ShadowRepo } from './shadow.ts'
 
-export type PendingTurn = { turnId: string; prompt: string; startedAt: number; base: string; session: string }
+export type PendingTurn = {
+  turnId: string
+  prompt: string
+  startedAt: number
+  base: string
+  session: string
+  /** Secrets Claude's file tools wrote so far, which snapshots leave out. */
+  secrets?: string[]
+}
 
 const PENDING = 'refs/tm/pending/'
 const STALE_MS = 12 * 60 * 60 * 1000

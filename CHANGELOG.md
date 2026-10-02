@@ -6,6 +6,18 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+### Changed
+
+- Secrets are left out of snapshots: `.env` files (not `.env.example`), keys and certificates, `.npmrc`, `.pypirc`,
+  `.netrc`, credentials and kubeconfigs are never copied, and undo and travel never write them, even from an older
+  snapshot that holds a copy. A turn whose file tools wrote one still flags it in the security diff. In a history made
+  before this, the next snapshot records them as removed from snapshots (not from your project); older snapshots keep
+  their copies until the history is deleted with `/tm projects rm N --yes`.
+
+### Added
+
+- `/tm secrets keep | skip`: keep secrets in a project's snapshots, so they can be undone, or leave them out.
+
 ## [0.7.0] - 2026-10-02
 
 ### Added

@@ -36,6 +36,8 @@ export type Entry = {
   /** For an undo or a travel: the snapshot it went back to or reverted. */
   target: string | null
   isInterrupted: boolean
+  /** For a turn: secrets Claude's file tools wrote, which its snapshots left out. */
+  secrets: string[]
   /** For a turn, what its steps changed together; else the commit's own. */
   changes: Change[]
   counts: Counts

@@ -13,6 +13,8 @@ export type Meta = {
   base?: string | undefined
   target?: string | undefined
   isInterrupted?: boolean
+  /** Secrets Claude's file tools wrote during a turn, left out of its snapshots. */
+  secrets?: string[]
 }
 
 const ANSWER_MARK = '--- tm-answer ---'
@@ -23,6 +25,7 @@ export function message(meta: Meta): string {
   if (meta.base) lines.push(`tm-base: ${meta.base}`)
   if (meta.target) lines.push(`tm-target: ${meta.target}`)
   if (meta.isInterrupted) lines.push('tm-interrupted: true')
+  for (const path of meta.secrets ?? []) if (!/[\r\n]/.test(path)) lines.push(`tm-secret: ${path}`)
   if (meta.prompt || meta.answer) lines.push('', meta.prompt ?? '')
   if (meta.answer) lines.push(ANSWER_MARK, meta.answer)
   return `${lines.join('\n')}\n`
@@ -41,6 +44,7 @@ export function parseMessage(body: string): Meta {
     else if (key === 'base') meta.base = value
     else if (key === 'target') meta.target = value
     else if (key === 'interrupted') meta.isInterrupted = value === 'true'
+    else if (key === 'secret') meta.secrets = [...(meta.secrets ?? []), value]
   }
   const text = lines
     .slice(i + 1)
