@@ -8,8 +8,8 @@ import { join } from 'node:path'
 import { after, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { TimeMachine, deleteProject, listProjects } from '../hooks/core.ts'
-import type { Deps, ExecResult } from '../hooks/core.ts'
+import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
+import type { Deps, ExecResult } from '../src/index.ts'
 
 const deps: Deps = {
   exec: (argv, init) =>
@@ -51,7 +51,11 @@ async function sh(...argv: string[]): Promise<string> {
 
 const file = (path: string) => join(root, path)
 const read = (path: string) => readFile(file(path), 'utf8')
-const exists = (path: string) => stat(file(path)).then(() => true, () => false)
+const exists = (path: string) =>
+  stat(file(path)).then(
+    () => true,
+    () => false,
+  )
 
 async function put(path: string, text: string | Uint8Array): Promise<void> {
   await mkdir(join(file(path), '..'), { recursive: true })
@@ -273,7 +277,10 @@ describe('steps and other writers', () => {
     const entry = await tm.finishTurn(id, SESSION, false)
     assert.ok(entry)
     const steps = await tm.steps(entry.id)
-    assert.deepEqual(steps.map(step => step.title), ['Write src/user.ts', 'Bash: sed -i auth'])
+    assert.deepEqual(
+      steps.map(step => step.title),
+      ['Write src/user.ts', 'Bash: sed -i auth'],
+    )
     await tm.undo(steps[1]?.id ?? '')
     assert.equal(await read('src/auth.ts'), 'A\n')
     assert.equal(await read('src/user.ts'), 'step one\n')
@@ -339,7 +346,10 @@ describe('prune and projects', () => {
     const report = await tm.prune({ keepLast: 1 })
     assert.ok(report.removed > 0)
     const history = await tm.history()
-    assert.deepEqual(history.map(entry => entry.kind), ['turn', 'baseline'])
+    assert.deepEqual(
+      history.map(entry => entry.kind),
+      ['turn', 'baseline'],
+    )
     assert.match(history[1]?.title ?? '', /pruned/)
     await tm.undo(history[0]?.id ?? '')
     assert.equal(await read('src/user.ts'), 'two\n')
@@ -349,7 +359,10 @@ describe('prune and projects', () => {
     await turn('old', () => put('src/user.ts', 'old\n'))
     const report = await tm.prune({ olderThanMs: 0 })
     assert.ok(report.removed > 0)
-    assert.deepEqual((await tm.history()).map(entry => entry.kind), ['baseline'])
+    assert.deepEqual(
+      (await tm.history()).map(entry => entry.kind),
+      ['baseline'],
+    )
     assert.equal(await read('src/user.ts'), 'old\n')
   })
 
@@ -506,7 +519,6 @@ describe('checkpoints and .tmignore', () => {
   })
 })
 
-
 describe('taking snapshots into the project repository', () => {
   test("/tm commit commits Claude's files of a turn, as the turn left them", async () => {
     await put('src/auth.ts', 'A\nmine, uncommitted\n')
@@ -520,10 +532,11 @@ describe('taking snapshots into the project repository', () => {
     const report = await tm.commitTo(entry.id, undefined, false)
     assert.equal(await sh('git', 'rev-parse', 'HEAD^'), before)
     assert.equal((await sh('git', 'log', '-1', '--format=%s')).trim(), 'add token')
-    assert.deepEqual(
-      (await sh('git', 'show', '--name-status', '--format=', 'HEAD')).trim().split('\n').sort(),
-      ['A\tsrc/token.ts', 'D\tsrc/legacy.ts', 'M\tsrc/user.ts'],
-    )
+    assert.deepEqual((await sh('git', 'show', '--name-status', '--format=', 'HEAD')).trim().split('\n').sort(), [
+      'A\tsrc/token.ts',
+      'D\tsrc/legacy.ts',
+      'M\tsrc/user.ts',
+    ])
     assert.deepEqual(report.committed.sort(), ['src/legacy.ts', 'src/token.ts', 'src/user.ts'])
     // Only the person's own edit is left over, unstaged; the work tree is untouched.
     assert.equal(await sh('git', 'status', '--porcelain'), ' M src/auth.ts\n')

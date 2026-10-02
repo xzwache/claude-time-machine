@@ -7,8 +7,8 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { TimeMachine } from '../hooks/core.ts'
-import type { Deps, ExecResult } from '../hooks/core.ts'
+import { TimeMachine } from '../src/index.ts'
+import type { Deps, ExecResult } from '../src/index.ts'
 
 const deps: Deps = {
   exec: (argv, init) =>
@@ -17,7 +17,8 @@ const deps: Deps = {
         argv[0] ?? '',
         argv.slice(1),
         { cwd: init.cwd, env: { ...process.env, ...init.env }, maxBuffer: 256 * 1024 * 1024, encoding: 'utf8' },
-        (error, stdout, stderr) => resolve({ exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr }),
+        (error, stdout, stderr) =>
+          resolve({ exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr }),
       )
       child.stdin?.on('error', () => undefined)
       child.stdin?.end(init.stdin ?? '')
@@ -54,7 +55,9 @@ try {
   console.log(`shadow repository after baseline: ${await du(join(store, 'shadow.git'))}`)
   // maintain() lets gc run in the background; time it here in the foreground.
   const shadow = ['git', `--git-dir=${join(store, 'shadow.git')}`]
-  await time('pack (gc, foreground)', () => deps.exec([...shadow, '-c', 'gc.autoDetach=false', '-c', 'gc.auto=1000', 'gc', '--auto', '-q'], {}))
+  await time('pack (gc, foreground)', () =>
+    deps.exec([...shadow, '-c', 'gc.autoDetach=false', '-c', 'gc.auto=1000', 'gc', '--auto', '-q'], {}),
+  )
   console.log(`shadow repository after packing:  ${await du(join(store, 'shadow.git'))}`)
   await time('turn start, nothing changed', () => tm.beginTurn('t1', 'bench', 's'))
   await time('Bash before (snapshot)', () => tm.beforeCommand('s'))

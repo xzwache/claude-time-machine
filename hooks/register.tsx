@@ -5,13 +5,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { isReadOnlyCommand } from './bash.ts'
-import { runCommand } from './commands.ts'
-import type { Host } from './commands.ts'
-import { TimeMachine } from './core.ts'
-import type { Deps } from './core.ts'
-import { countsText, plural, summaryLine } from './format.ts'
-import { bandView, paneView } from './view.tsx'
+import { isReadOnlyCommand } from '../src/bash.ts'
+import { runCommand } from '../src/commands.ts'
+import type { Host } from '../src/commands.ts'
+import { TimeMachine } from '../src/index.ts'
+import type { Deps } from '../src/index.ts'
+import { countsText, plural, summaryLine } from '../src/format.ts'
+import { bandView, paneView } from '../src/view.tsx'
 import type { Band, Details, Entry, Mode } from '../types'
 
 const COMMAND = 'tm'
@@ -57,7 +57,9 @@ export const register: Register = on => {
     await quietly($, (tm, session) => tm.beginTurn(e.turnId, e.text, session))
     const took = Date.now() - started
     if (took > SLOW_SNAPSHOT_MS) {
-      $.ui.toast(`⏱ Snapshot took ${(took / 1000).toFixed(1)}s. List big folders in .tmignore or .gitignore to speed it up.`)
+      $.ui.toast(
+        `⏱ Snapshot took ${(took / 1000).toFixed(1)}s. List big folders in .tmignore or .gitignore to speed it up.`,
+      )
     }
 
     return next(e)
@@ -206,7 +208,10 @@ async function machine($: EngineInterface): Promise<TimeMachine> {
 
 async function digest(text: string): Promise<string> {
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
-  return [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('').slice(0, 16)
+  return [...new Uint8Array(hash)]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 16)
 }
 
 /**
@@ -268,7 +273,10 @@ function report($: EngineInterface, error: unknown): string {
  * Runs snapshot work for a hook, only in `auto` mode, never failing the hook:
  * a time machine error must not stop Claude's turn.
  */
-async function quietly($: EngineInterface, work: (tm: TimeMachine, session: string) => Promise<unknown>): Promise<void> {
+async function quietly(
+  $: EngineInterface,
+  work: (tm: TimeMachine, session: string) => Promise<unknown>,
+): Promise<void> {
   try {
     if ((await modeOf($)) !== 'auto') return
     await work(await machine($), await $.session.id())

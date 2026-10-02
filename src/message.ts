@@ -42,7 +42,10 @@ export function parseMessage(body: string): Meta {
     else if (key === 'target') meta.target = value
     else if (key === 'interrupted') meta.isInterrupted = value === 'true'
   }
-  const text = lines.slice(i + 1).join('\n').replace(/\n+$/, '')
+  const text = lines
+    .slice(i + 1)
+    .join('\n')
+    .replace(/\n+$/, '')
   const mark = text.lastIndexOf(`\n${ANSWER_MARK}\n`)
   const prompt = mark < 0 ? text : text.slice(0, mark)
   if (prompt) meta.prompt = prompt

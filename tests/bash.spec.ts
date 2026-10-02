@@ -3,7 +3,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { isReadOnlyCommand } from '../hooks/bash.ts'
+import { isReadOnlyCommand } from '../src/bash.ts'
 
 describe('read-only commands', () => {
   const readOnly = [

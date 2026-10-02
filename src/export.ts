@@ -41,13 +41,25 @@ const IN_PROGRESS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-me
  * skipped. Refuses while a merge or rebase is in progress, and, unless
  * `isForced`, when the project has staged changes to those paths.
  */
-export async function commitPaths(repos: Repos, sources: Source[], message: string, isForced: boolean): Promise<CommitReport> {
+export async function commitPaths(
+  repos: Repos,
+  sources: Source[],
+  message: string,
+  isForced: boolean,
+): Promise<CommitReport> {
   const project = await openProject(repos)
-  const { kept, skipped } = await dropIgnored(repos, project.prefix, sources.map(source => source.path))
+  const { kept, skipped } = await dropIgnored(
+    repos,
+    project.prefix,
+    sources.map(source => source.path),
+  )
   if (kept.length === 0) throw new Error('Nothing to commit: every changed path is ignored by this repository')
   const wanted = new Set(kept)
   const pending = sources.filter(source => wanted.has(source.path))
-  const staged = await stagedAmong(repos, kept.map(path => project.prefix + path))
+  const staged = await stagedAmong(
+    repos,
+    kept.map(path => project.prefix + path),
+  )
   if (staged.length > 0 && !isForced) {
     throw new Error(`Staged changes to ${staged.join(', ')} would be replaced; commit or unstage them, or add --force`)
   }
@@ -64,7 +76,9 @@ export async function commitPaths(repos: Repos, sources: Source[], message: stri
   if (project.head !== undefined && tree === (await repos.user(['rev-parse', `${project.head}^{tree}`]))) {
     throw new Error('Nothing to commit: HEAD already has these files as they were')
   }
-  const commit = await repos.user(['commit-tree', tree, ...(project.head ? ['-p', project.head] : [])], { stdin: message })
+  const commit = await repos.user(['commit-tree', tree, ...(project.head ? ['-p', project.head] : [])], {
+    stdin: message,
+  })
   await repos.user(['update-ref', '-m', 'time machine: commit', 'HEAD', commit, project.head ?? ZERO])
   // The index takes the committed versions of these paths, nothing else.
   for (const chunk of chunks(kept.map(path => project.prefix + path))) {
@@ -79,26 +93,48 @@ export async function commitPaths(repos: Repos, sources: Source[], message: stri
  * and files the time machine never snapshots (ignored, .tmignore) keep
  * HEAD's version. Neither HEAD, the index nor the work tree changes.
  */
-export async function branchSnapshot(repos: Repos, commit: string, name: string, message: string): Promise<BranchReport> {
-  if (!(await repos.userSucceeds(['check-ref-format', '--branch', name]))) throw new Error(`Not a valid branch name: ${name}`)
-  if (await repos.userSucceeds(['rev-parse', '--verify', '-q', `refs/heads/${name}`])) throw new Error(`Branch ${name} already exists`)
+export async function branchSnapshot(
+  repos: Repos,
+  commit: string,
+  name: string,
+  message: string,
+): Promise<BranchReport> {
+  if (!(await repos.userSucceeds(['check-ref-format', '--branch', name]))) {
+    throw new Error(`Not a valid branch name: ${name}`)
+  }
+  if (await repos.userSucceeds(['rev-parse', '--verify', '-q', `refs/heads/${name}`])) {
+    throw new Error(`Branch ${name} already exists`)
+  }
   const project = await openProject(repos)
   const all = await treeEntries(repos, commit, [])
-  const { kept, skipped } = await dropIgnored(repos, project.prefix, all.map(entry => entry.path))
+  const { kept, skipped } = await dropIgnored(
+    repos,
+    project.prefix,
+    all.map(entry => entry.path),
+  )
   const wanted = new Set(kept)
-  const entries = all.filter(entry => wanted.has(entry.path)).map(entry => ({ ...entry, path: project.prefix + entry.path }))
+  const entries = all
+    .filter(entry => wanted.has(entry.path))
+    .map(entry => ({ ...entry, path: project.prefix + entry.path }))
 
   // What HEAD has under the root that the snapshot lacks: gone in the
   // snapshot unless the time machine never looks at it.
   const inHead = project.head === undefined ? [] : await userPaths(repos, project.head, project.prefix)
   const present = new Set(entries.map(entry => entry.path))
   const absent = inHead.filter(path => !present.has(path))
-  const unseen = new Set(await shadowIgnores(repos, absent.map(path => path.slice(project.prefix.length))))
+  const unseen = new Set(
+    await shadowIgnores(
+      repos,
+      absent.map(path => path.slice(project.prefix.length)),
+    ),
+  )
   const removed = absent.filter(path => !unseen.has(path.slice(project.prefix.length)))
 
   await copyObjects(repos, project, entries)
   const tree = await buildTree(repos, project, project.head ?? null, entries, removed)
-  const made = await repos.user(['commit-tree', tree, ...(project.head ? ['-p', project.head] : [])], { stdin: message })
+  const made = await repos.user(['commit-tree', tree, ...(project.head ? ['-p', project.head] : [])], {
+    stdin: message,
+  })
   await repos.user(['update-ref', '-m', 'time machine: branch', `refs/heads/${name}`, made, ZERO])
   return { commit: made, branch: name, files: entries.length, skipped }
 }
@@ -108,9 +144,13 @@ type Project = { prefix: string; head: string | undefined; branch: string; objec
 async function openProject(repos: Repos): Promise<Project> {
   if (!(await repos.userSucceeds(['rev-parse', '--git-dir']))) throw new Error('This project is not a git repository')
   for (const marker of IN_PROGRESS) {
-    if (await repos.exists(await gitPath(repos, marker))) throw new Error('A merge, rebase or cherry-pick is in progress; finish it first')
+    if (await repos.exists(await gitPath(repos, marker))) {
+      throw new Error('A merge, rebase or cherry-pick is in progress; finish it first')
+    }
   }
-  const head = (await repos.userSucceeds(['rev-parse', '--verify', '-q', 'HEAD'])) ? await repos.user(['rev-parse', 'HEAD']) : undefined
+  const head = (await repos.userSucceeds(['rev-parse', '--verify', '-q', 'HEAD']))
+    ? await repos.user(['rev-parse', 'HEAD'])
+    : undefined
   const branch = (await repos.user(['symbolic-ref', '-q', '--short', 'HEAD'], { isLenient: true })) || 'detached HEAD'
   return {
     prefix: await repos.user(['rev-parse', '--show-prefix']),
@@ -126,14 +166,23 @@ async function gitPath(repos: Repos, name: string): Promise<string> {
 }
 
 /** Paths the project's .gitignore covers and git does not track there. */
-async function dropIgnored(repos: Repos, prefix: string, paths: string[]): Promise<{ kept: string[]; skipped: string[] }> {
+async function dropIgnored(
+  repos: Repos,
+  prefix: string,
+  paths: string[],
+): Promise<{ kept: string[]; skipped: string[] }> {
   if (paths.length === 0) return { kept: [], skipped: [] }
   const out = await repos.user(['check-ignore', '-z', '--stdin'], {
     stdin: paths.map(path => prefix + path).join('\0'),
     trim: false,
     isLenient: true,
   })
-  const ignored = new Set(out.split('\0').filter(Boolean).map(path => path.slice(prefix.length)))
+  const ignored = new Set(
+    out
+      .split('\0')
+      .filter(Boolean)
+      .map(path => path.slice(prefix.length)),
+  )
   return { kept: paths.filter(path => !ignored.has(path)), skipped: paths.filter(path => ignored.has(path)) }
 }
 
@@ -151,7 +200,10 @@ async function shadowIgnores(repos: Repos, paths: string[]): Promise<string[]> {
 async function stagedAmong(repos: Repos, paths: string[]): Promise<string[]> {
   const staged: string[] = []
   for (const chunk of chunks(paths)) {
-    const out = await repos.user(['diff', '--cached', '--name-only', '-z', '--', ...chunk], { trim: false, isLenient: true })
+    const out = await repos.user(['diff', '--cached', '--name-only', '-z', '--', ...chunk], {
+      trim: false,
+      isLenient: true,
+    })
     staged.push(...out.split('\0').filter(Boolean))
   }
   return staged

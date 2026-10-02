@@ -81,7 +81,9 @@ export function parseDiffTree(out: string): Change[] {
 /** The turn markers in `raws` whose base is not among them. */
 export function missingBases(raws: Raw[]): string[] {
   const ids = new Set(raws.map(raw => raw.id))
-  return raws.flatMap(raw => (raw.meta.kind === 'turn' && raw.meta.base && !ids.has(raw.meta.base) ? [raw.meta.base] : []))
+  return raws.flatMap(raw =>
+    raw.meta.kind === 'turn' && raw.meta.base && !ids.has(raw.meta.base) ? [raw.meta.base] : [],
+  )
 }
 
 /**
