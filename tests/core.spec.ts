@@ -23,6 +23,7 @@ import type { FileHeat, Heat } from '../src/heat.ts'
 import { heatPage, pageLibrary } from '../src/heat-page.ts'
 import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
 import type { Deps, ExecResult } from '../src/index.ts'
+import { versionProblem } from '../src/version.ts'
 import {
   NOT_KEPT,
   SECRET_EXCLUDES,
@@ -1005,5 +1006,21 @@ describe('the security diff', () => {
     assert.deepEqual(await tm.findings(entry.id), [])
     assert.equal(await tm.undoSensitive(entry.id), undefined)
     assert.equal(await read('src/user.ts'), 'plain\n')
+  })
+})
+
+describe('the Claude Code version', () => {
+  test('2.1.287 and newer pass; older, or too old to say, get told to update', () => {
+    assert.equal(versionProblem('2.1.287'), undefined)
+    assert.equal(versionProblem('2.1.300-dev'), undefined)
+    assert.equal(versionProblem('2.2.0'), undefined)
+    assert.equal(versionProblem('3.0.1'), undefined)
+    assert.equal(versionProblem('custom-build'), undefined)
+    assert.match(versionProblem('2.1.286') ?? '', /needs Claude Code 2\.1\.287 or newer; this is 2\.1\.286/)
+    assert.match(versionProblem('1.9.999') ?? '', /this is 1\.9\.999/)
+    assert.match(
+      versionProblem(undefined) ?? '',
+      /needs Claude Code 2\.1\.287 or newer\. Update it with: claude update/,
+    )
   })
 })

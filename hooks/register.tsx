@@ -11,6 +11,7 @@ import type { Host } from '../src/commands.ts'
 import { TimeMachine } from '../src/index.ts'
 import type { Deps } from '../src/index.ts'
 import { countsText, plural, summaryLine } from '../src/format.ts'
+import { versionProblem } from '../src/version.ts'
 import { alertLine } from '../src/sensitive.ts'
 import { heatTree, turnsOf, viewOf } from '../src/heat.ts'
 import type { Heat } from '../src/heat.ts'
@@ -35,6 +36,7 @@ const band = atom({ plugin: 'time-machine', key: 'band' } as const, null as Band
 const heat = atom({ plugin: 'time-machine', key: 'heat' } as const, null as HeatView | null)
 
 const machines = new Map<string, TimeMachine>()
+let checkedVersion: Promise<string | undefined> | undefined
 const gitProjects = new Map<string, boolean>()
 // The whole heat tree stays out of the state, which holds the folder shown.
 const heatTrees = new Map<string, HeatRead>()
@@ -48,6 +50,12 @@ export const register: Register = on => {
       description: 'Time machine: review, undo or travel between Claude turns',
       argumentHint: '[log | show N | undo [N] | redo | travel N | save name | on | off | help]',
     })
+    const problem = await versionCheck($)
+    if (problem !== undefined) {
+      $.ui.toast(`⏱ ${problem}`)
+      $.ui.log(problem)
+      return next(e)
+    }
     if ((await modeOf($)) !== 'off') {
       const tm = await machine($)
       void tm
@@ -129,7 +137,9 @@ export const register: Register = on => {
     return result
   })
 
-  on('command.run', { command: COMMAND }, async ($, e) => ({ text: await runCommand(hostOf($), e.args) }))
+  on('command.run', { command: COMMAND }, async ($, e) => ({
+    text: (await versionCheck($)) ?? (await runCommand(hostOf($), e.args)),
+  }))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const shown = await read($, band)
@@ -380,12 +390,26 @@ function report($: EngineInterface, error: unknown): string {
  * Runs snapshot work for a hook, only in `auto` mode, never failing the hook:
  * a time machine error must not stop Claude's turn.
  */
+/** Why this Claude Code cannot run the time machine, once per load; undefined when it can. */
+function versionCheck($: EngineInterface): Promise<string | undefined> {
+  checkedVersion ??= (async () => {
+    // Every release with this call answers it; one that cannot is older than it.
+    try {
+      const { base, version } = await $.session.version()
+      return versionProblem(base ?? version)
+    } catch {
+      return versionProblem(undefined)
+    }
+  })()
+  return checkedVersion
+}
+
 async function quietly(
   $: EngineInterface,
   work: (tm: TimeMachine, session: string) => Promise<unknown>,
 ): Promise<void> {
   try {
-    if ((await modeOf($)) !== 'auto') return
+    if ((await versionCheck($)) !== undefined || (await modeOf($)) !== 'auto') return
     await work(await machine($), await $.session.id())
   } catch (error) {
     report($, error)

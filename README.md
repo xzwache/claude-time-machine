@@ -56,6 +56,22 @@ The time machine snapshots the whole project around every tool call, so:
 
 They work fine side by side.
 
+### Why not just…
+
+**…commit more often?** A commit is what you decide to keep. Claude's mistakes land between commits, in the middle
+of a turn, and getting back with `git checkout` or `git stash` throws away your own uncommitted work along with
+Claude's. The time machine keeps every step without touching your repository, and undo leaves your edits alone.
+
+**…use [bashward](https://github.com/f4rkh4d/bashward)?** bashward is a Bash hook that reads each command, guesses
+which paths it will write (`rm`, `mv`, `cp`, `dd`, `sed -i`, `tee`, `truncate`, `>` redirects) and copies them before
+it runs. As of 0.1.1, it judges a command by its first word, so `cd src && rm old.ts` or `make clean && rm -rf dist` slip past it,
+as do globs like `rm *.log` and anything that writes without naming the path: `npm run codegen`, `git checkout .`, a
+formatter, a migration. The time machine does not guess: it snapshots the project before and after each command and
+records what actually changed. bashward does reach files outside the project, which the time machine does not.
+
+**…run Claude in a sandbox or a container?** A sandbox limits what Claude can reach. It does not give you back what
+Claude did inside it. Use both.
+
 ## Install
 
 Requires macOS or Linux, git, and Claude Code 2.1.287 or newer.
@@ -66,6 +82,18 @@ claude plugin install time-machine@claude-time-machine
 ```
 
 Start Claude in a git project. The time machine starts on its own; in any other folder it stays off until `/tm on`.
+On an older Claude Code it says so and stays off.
+
+## Uninstall
+
+```sh
+claude plugin uninstall time-machine@claude-time-machine
+claude plugin marketplace remove claude-time-machine
+rm -rf ~/.claude/time-machine   # every project's history, heat maps and patches
+```
+
+Your projects are not touched: the history lives only in `~/.claude/time-machine/`. To delete one project's history
+and keep the plugin, use `/tm projects rm N --yes`.
 
 ## Use
 

@@ -37,8 +37,15 @@ function typed(args: string) {
 }
 
 /** Answers every command with success and `answers[argv]` or nothing; records the calls. */
-function fakeHost(on: On, given: Record<string, string> = {}, isGit = true, root = '/work/project'): string[][] {
+function fakeHost(
+  on: On,
+  given: Record<string, string> = {},
+  isGit = true,
+  root = '/work/project',
+  version = '2.1.287',
+): string[][] {
   const calls: string[][] = []
+  on('session.version', () => ({ value: { version, base: version, builtAt: '2026-10-01T00:00:00Z' } }))
   const answers: Record<string, string> = { '--is-inside-work-tree': isGit ? 'true\n' : '', ...given }
   on('fs.exists', () => ({ value: false }))
   mock.env(on, { HOME: '/home/tester' })
@@ -56,6 +63,16 @@ function fakeHost(on: On, given: Record<string, string> = {}, isGit = true, root
   })
   return calls
 }
+
+describe('an older Claude Code', () => {
+  test('gets a clear message instead of a half-working time machine', async ($, on) => {
+    const calls = fakeHost(on, {}, true, '/work/project', '2.1.250')
+    expect((await $.command.run(typed('log'))).text).toBe(
+      'Time machine needs Claude Code 2.1.287 or newer; this is 2.1.250. Update it with: claude update',
+    )
+    expect(calls.some(argv => argv.includes('init'))).toBe(false)
+  })
+})
 
 describe('the /tm command', () => {
   test('keeps the shadow repository under ~/.claude/time-machine, never in the project', async ($, on) => {
