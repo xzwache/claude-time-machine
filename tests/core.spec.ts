@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { after, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { TimeMachine } from '../hooks/core.ts'
+import { TimeMachine, deleteProject, listProjects } from '../hooks/core.ts'
 import type { Deps, ExecResult } from '../hooks/core.ts'
 
 const deps: Deps = {
@@ -38,8 +38,10 @@ after(async () => {
 })
 
 let root = ''
+let store = ''
 let tm: TimeMachine
 let turns = 0
+const SESSION = 'session-a'
 
 async function sh(...argv: string[]): Promise<string> {
   const result = await deps.exec(argv, { cwd: root })
@@ -56,22 +58,36 @@ async function put(path: string, text: string | Uint8Array): Promise<void> {
   await writeFile(file(path), text)
 }
 
-/** Runs `work` as one Claude turn and returns the recorded entry. */
-async function turn(prompt: string, work: () => Promise<void>) {
+/** Runs `work` as one Claude turn of a single Bash call; returns the turn. */
+async function turn(prompt: string, work: () => Promise<void>, session = SESSION) {
   const id = `turn-${++turns}`
-  await tm.beginTurn(id, prompt)
+  await tm.beginTurn(id, prompt, session)
+  await bash(work, session)
+  return tm.finishTurn(id, session, false, `answer to ${prompt}`)
+}
+
+/** One Bash call of Claude's. */
+async function bash(work: () => Promise<void>, session = SESSION, command = 'cmd'): Promise<void> {
+  await tm.beforeCommand(session)
   await work()
-  return tm.finishTurn(id, false)
+  await tm.afterCommand(command, session)
+}
+
+/** One Write call of Claude's. */
+async function write(path: string, text: string, session = SESSION): Promise<void> {
+  await tm.beforeFileWrite(file(path), session)
+  await put(path, text)
+  await tm.afterFileWrite(file(path), 'Write', session)
 }
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'tm-project-'))
-  const store = await mkdtemp(join(tmpdir(), 'tm-store-'))
+  store = await mkdtemp(join(tmpdir(), 'tm-store-'))
   sandboxes.push(root, store)
   await sh('git', 'init', '-q')
   await sh('git', 'config', 'user.email', 'test@example.com')
   await sh('git', 'config', 'user.name', 'Test')
-  await put('.gitignore', '.env\nbuild/\n')
+  await put('.gitignore', '.env\nbuild/\nnode_modules/\n')
   await put('src/auth.ts', 'A\n')
   await put('src/user.ts', 'user\n')
   await put('src/legacy.ts', 'legacy\n')
@@ -202,42 +218,153 @@ describe('undoing a turn', () => {
 })
 
 describe('ignored files', () => {
-  test('an ignored file a file tool edits is captured and restored', async () => {
+  test('a small ignored file is snapshotted, so a Bash change to it is undone', async () => {
     await put('.env', 'SECRET=old\n')
-    const id = `turn-${++turns}`
-    await tm.beginTurn(id, 'edit env')
-    await tm.beforeFileWrite(file('.env'))
-    await put('.env', 'SECRET=new\n')
-    await tm.afterFileWrite(file('.env'))
-    const entry = await tm.finishTurn(id, false)
+    const entry = await turn('edit env', () => put('.env', 'SECRET=new\n'))
     assert.ok(entry)
-    assert.deepEqual(await tm.changes(entry.id), [{ status: 'modified', path: '.env' }])
+    assert.deepEqual(entry.changes, [{ status: 'modified', path: '.env' }])
     await tm.undo(entry.id)
     assert.equal(await read('.env'), 'SECRET=old\n')
   })
 
-  test('an ignored file a file tool creates is removed on undo', async () => {
+  test('a file under an ignored directory is captured when a file tool edits it', async () => {
+    await put('build/config.json', '{"old":true}\n')
     const id = `turn-${++turns}`
-    await tm.beginTurn(id, 'create env')
-    await tm.beforeFileWrite(file('.env'))
-    await put('.env', 'NEW=1\n')
-    await tm.afterFileWrite(file('.env'))
-    const entry = await tm.finishTurn(id, false)
+    await tm.beginTurn(id, 'edit build config', SESSION)
+    await write('build/config.json', '{"new":true}\n')
+    const entry = await tm.finishTurn(id, SESSION, false)
     assert.ok(entry)
+    assert.deepEqual(entry.changes, [{ status: 'modified', path: 'build/config.json' }])
     await tm.undo(entry.id)
-    assert.equal(await exists('.env'), false)
+    assert.equal(await read('build/config.json'), '{"old":true}\n')
   })
 
-  test('ignored files nobody named are neither snapshotted nor touched', async () => {
-    await put('build/out.js', 'built\n')
-    const entry = await turn('build', async () => {
-      await put('build/out.js', 'rebuilt\n')
+  test('an ignored file a file tool creates is removed on undo', async () => {
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'create env', SESSION)
+    await write('build/new.txt', 'NEW=1\n')
+    const entry = await tm.finishTurn(id, SESSION, false)
+    assert.ok(entry)
+    await tm.undo(entry.id)
+    assert.equal(await exists('build/new.txt'), false)
+  })
+
+  test('ignored directories and big ignored files stay out of snapshots', async () => {
+    await put('node_modules/pkg/index.js', 'v1\n')
+    await put('.env', new Uint8Array(2 * 1024 * 1024))
+    const entry = await turn('install', async () => {
+      await put('node_modules/pkg/index.js', 'v2\n')
       await put('src/user.ts', 'changed\n')
     })
     assert.ok(entry)
+    assert.deepEqual(entry.changes, [{ status: 'modified', path: 'src/user.ts' }])
     await tm.undo(entry.id)
-    assert.equal(await read('build/out.js'), 'rebuilt\n')
+    assert.equal(await read('node_modules/pkg/index.js'), 'v2\n')
     assert.equal(await read('src/user.ts'), 'user\n')
+  })
+})
+
+describe('steps and other writers', () => {
+  test('a turn is made of steps, and one step can be undone alone', async () => {
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'two steps', SESSION)
+    await write('src/user.ts', 'step one\n')
+    await bash(() => put('src/auth.ts', 'step two\n'), SESSION, 'sed -i auth')
+    const entry = await tm.finishTurn(id, SESSION, false)
+    assert.ok(entry)
+    const steps = await tm.steps(entry.id)
+    assert.deepEqual(steps.map(step => step.title), ['Write src/user.ts', 'Bash: sed -i auth'])
+    await tm.undo(steps[1]?.id ?? '')
+    assert.equal(await read('src/auth.ts'), 'A\n')
+    assert.equal(await read('src/user.ts'), 'step one\n')
+  })
+
+  test("an edit someone else makes during a turn is not undone with Claude's", async () => {
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'mixed', SESSION)
+    await write('src/user.ts', 'claude\n')
+    await put('src/auth.ts', 'A\nmine, typed while Claude worked\n')
+    await bash(() => put('src/legacy.ts', 'claude too\n'))
+    const entry = await tm.finishTurn(id, SESSION, false)
+    assert.ok(entry)
+    assert.deepEqual(entry.changes.map(change => change.path).sort(), ['src/legacy.ts', 'src/user.ts'])
+    await tm.undo(entry.id)
+    assert.equal(await read('src/auth.ts'), 'A\nmine, typed while Claude worked\n')
+    assert.equal(await read('src/user.ts'), 'user\n')
+    assert.equal(await read('src/legacy.ts'), 'legacy\n')
+  })
+
+  test('a file someone else also edited during the turn is a conflict', async () => {
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'tainted', SESSION)
+    await write('src/user.ts', 'claude\n')
+    await put('src/user.ts', 'claude\nand mine\n')
+    await bash(async () => undefined)
+    const entry = await tm.finishTurn(id, SESSION, false)
+    assert.ok(entry)
+    const report = await tm.undo(entry.id)
+    assert.deepEqual(report.conflicts, ['src/user.ts'])
+    assert.equal(await read('src/user.ts'), 'claude\nand mine\n')
+  })
+
+  test('two sessions at once: each undo reverts only its own steps', async () => {
+    await tm.beginTurn('a1', 'session a', 'session-a')
+    await tm.beginTurn('b1', 'session b', 'session-b')
+    await write('src/user.ts', 'from a\n', 'session-a')
+    await write('src/auth.ts', 'from b\n', 'session-b')
+    const a = await tm.finishTurn('a1', 'session-a', false)
+    const b = await tm.finishTurn('b1', 'session-b', false)
+    assert.ok(a && b)
+    assert.deepEqual(a.changes, [{ status: 'modified', path: 'src/user.ts' }])
+    assert.deepEqual(b.changes, [{ status: 'modified', path: 'src/auth.ts' }])
+    await tm.undo(a.id)
+    assert.equal(await read('src/user.ts'), 'user\n')
+    assert.equal(await read('src/auth.ts'), 'from b\n')
+    const top = (await tm.history()).map(entry => entry.title)
+    assert.ok(top.includes('session a') && top.includes('session b'))
+  })
+
+  test("a turn keeps Claude's answer", async () => {
+    const entry = await turn('explain and fix', () => put('src/user.ts', 'fixed\n'))
+    assert.equal(entry?.answer, 'answer to explain and fix')
+  })
+})
+
+describe('prune and projects', () => {
+  test('keeps the newest entries, and they can still be undone', async () => {
+    await turn('one', () => put('src/user.ts', 'one\n'))
+    await turn('two', () => put('src/user.ts', 'two\n'))
+    const three = await turn('three', () => put('src/user.ts', 'three\n'))
+    assert.ok(three)
+    const report = await tm.prune({ keepLast: 1 })
+    assert.ok(report.removed > 0)
+    const history = await tm.history()
+    assert.deepEqual(history.map(entry => entry.kind), ['turn', 'baseline'])
+    assert.match(history[1]?.title ?? '', /pruned/)
+    await tm.undo(history[0]?.id ?? '')
+    assert.equal(await read('src/user.ts'), 'two\n')
+  })
+
+  test('prunes by age', async () => {
+    await turn('old', () => put('src/user.ts', 'old\n'))
+    const report = await tm.prune({ olderThanMs: 0 })
+    assert.ok(report.removed > 0)
+    assert.deepEqual((await tm.history()).map(entry => entry.kind), ['baseline'])
+    assert.equal(await read('src/user.ts'), 'old\n')
+  })
+
+  test('lists and deletes project histories', async () => {
+    await turn('one', () => put('src/user.ts', 'one\n'))
+    const named = new TimeMachine(deps, root, join(store, '0123456789abcdef.git'))
+    await named.init()
+    const projects = await listProjects(deps.exec, store)
+    assert.equal(projects.length, 1)
+    assert.equal(projects[0]?.root, root)
+    assert.equal(projects[0]?.isRootPresent, true)
+    assert.ok((projects[0]?.bytes ?? 0) > 0)
+    await assert.rejects(deleteProject(deps.exec, store, '../etc'))
+    await deleteProject(deps.exec, store, '0123456789abcdef.git')
+    assert.deepEqual(await listProjects(deps.exec, store), [])
   })
 })
 
@@ -245,7 +372,7 @@ describe('history and travel', () => {
   test('records outside changes, turns and undos in order, without empty turns', async () => {
     await put('src/auth.ts', 'mine\n')
     const entry = await turn('first prompt\nmore text', () => put('src/user.ts', 'v2\n'))
-    await turn('a question with no edits', async () => {})
+    await turn('a question with no edits', async () => undefined)
     assert.ok(entry)
     await tm.undo(entry.id)
     const kinds = (await tm.history()).map(one => `${one.kind}:${one.title}`)
@@ -274,14 +401,14 @@ describe('history and travel', () => {
   })
 
   test('a turn left open by a crash is recorded as interrupted at the next turn', async () => {
-    await tm.beginTurn('crashed', 'never finished')
-    await put('src/user.ts', 'half done\n')
+    await tm.beginTurn('crashed', 'never finished', SESSION)
+    await bash(() => put('src/user.ts', 'half done\n'))
     const next = await turn('next', () => put('src/auth.ts', 'next\n'))
     assert.ok(next)
     const history = await tm.history()
     const crashed = history.find(one => one.title === 'never finished')
     assert.ok(crashed?.isInterrupted)
-    assert.deepEqual(await tm.changes(crashed.id), [{ status: 'modified', path: 'src/user.ts' }])
+    assert.deepEqual(crashed.changes, [{ status: 'modified', path: 'src/user.ts' }])
   })
 
   test('shows a per-file unified diff', async () => {
@@ -292,9 +419,9 @@ describe('history and travel', () => {
   })
 
   test('finishTurn ignores a turn id it did not start (subagents)', async () => {
-    await tm.beginTurn('main', 'main')
-    assert.equal(await tm.finishTurn('subagent', false), undefined)
-    await put('src/user.ts', 'x\n')
-    assert.ok(await tm.finishTurn('main', false))
+    await tm.beginTurn('main', 'main', SESSION)
+    assert.equal(await tm.finishTurn('subagent', SESSION, false), undefined)
+    await bash(() => put('src/user.ts', 'x\n'))
+    assert.ok(await tm.finishTurn('main', SESSION, false))
   })
 })

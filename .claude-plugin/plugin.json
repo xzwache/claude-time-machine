@@ -1,7 +1,7 @@
 {
   "name": "time-machine",
-  "version": "0.1.0",
-  "description": "Every Claude turn becomes a snapshot: review what changed, undo it, or travel back. Local, zero tokens.",
+  "version": "0.2.0",
+  "description": "Every Claude turn becomes a snapshot: review what changed step by step, undo it, or travel back. Local, zero tokens.",
   "author": {
     "name": "xzwache"
   },

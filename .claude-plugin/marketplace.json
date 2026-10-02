@@ -1,0 +1,12 @@
+{
+  "name": "claude-time-machine",
+  "description": "Claude Time Machine: every Claude turn becomes a snapshot you can review, undo or travel back to.",
+  "owner": { "name": "xzwache" },
+  "plugins": [
+    {
+      "name": "time-machine",
+      "source": "./",
+      "description": "Every Claude turn becomes a snapshot: review what changed, undo it, or travel back. Local, zero tokens."
+    }
+  ]
+}
