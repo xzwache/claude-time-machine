@@ -97,7 +97,10 @@ export function summaryLine(done: RestoreReport, id: string): string {
 export function hunksOf(diff: string): string | undefined {
   const start = diff.search(/^@@ /m)
   if (start < 0) return undefined
-  const hunks = diff.slice(start).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '?').split(/(?=^@@ )/m)
+  const hunks = diff
+    .slice(start)
+    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '?')
+    .split(/(?=^@@ )/m)
   let out = ''
   for (const hunk of hunks) {
     if (out.length + hunk.length > DIFF_LIMIT) break

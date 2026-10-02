@@ -20,15 +20,24 @@ export type Deps = {
 // Settings that would make a snapshot or a restore differ from the bytes on
 // disk, or make git do more than it is asked, are pinned for every call.
 export const GIT_FLAGS = [
-  '-c', 'core.autocrlf=false',
-  '-c', 'core.safecrlf=false',
-  '-c', 'core.symlinks=true',
-  '-c', 'core.fileMode=true',
-  '-c', 'core.quotePath=false',
-  '-c', 'core.hooksPath=/dev/null',
-  '-c', 'commit.gpgSign=false',
-  '-c', 'gc.auto=0',
-  '-c', 'advice.addEmbeddedRepo=false',
+  '-c',
+  'core.autocrlf=false',
+  '-c',
+  'core.safecrlf=false',
+  '-c',
+  'core.symlinks=true',
+  '-c',
+  'core.fileMode=true',
+  '-c',
+  'core.quotePath=false',
+  '-c',
+  'core.hooksPath=/dev/null',
+  '-c',
+  'commit.gpgSign=false',
+  '-c',
+  'gc.auto=0',
+  '-c',
+  'advice.addEmbeddedRepo=false',
 ]
 
 // Highest-precedence attributes: no line-ending, LFS or ident conversion, so

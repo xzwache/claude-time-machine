@@ -102,7 +102,12 @@ export class ShadowRepo {
   }
 
   /** Commits the index on the timeline when it differs from the tip. */
-  async commitIfChanged(session: string | null, kind: EntryKind, title: string, target?: string): Promise<string | undefined> {
+  async commitIfChanged(
+    session: string | null,
+    kind: EntryKind,
+    title: string,
+    target?: string,
+  ): Promise<string | undefined> {
     const tree = await this.writeTree()
     const tip = await this.tip()
     if (tree === tip.tree) return undefined
@@ -117,7 +122,10 @@ export class ShadowRepo {
     let onto = parent
     for (let attempt = 0; ; attempt++) {
       const id = await this.git(['commit-tree', tree, '-p', onto], { stdin: message(meta) })
-      const moved = await this.run(['git', ...GIT_FLAGS, 'update-ref', TIMELINE, id, onto], { cwd: this.root, env: this.env() })
+      const moved = await this.run(['git', ...GIT_FLAGS, 'update-ref', TIMELINE, id, onto], {
+        cwd: this.root,
+        env: this.env(),
+      })
       if (moved.exitCode === 0) return id
       if (attempt >= 5) throw new GitError(['update-ref', TIMELINE], moved)
       onto = (await this.tip()).commit
@@ -207,7 +215,8 @@ export class ShadowRepo {
         if (result.exitCode !== 0 && !options.isLenient) throw new GitError(args, result)
         return options.trim === false ? result.stdout : result.stdout.trim()
       },
-      userSucceeds: async args => (await this.run(['git', ...args], { cwd: this.root, env: { LC_ALL: 'C' } })).exitCode === 0,
+      userSucceeds: async args =>
+        (await this.run(['git', ...args], { cwd: this.root, env: { LC_ALL: 'C' } })).exitCode === 0,
       exists: async path => (await this.run(['test', '-e', path], {})).exitCode === 0,
       remove: async path => void (await this.run(['rm', '-f', '--', path], {})),
     }
@@ -242,7 +251,10 @@ export class ShadowRepo {
         ['find', ...chunk.map(path => `./${path}`), '-prune', '-type', 'f', '-size', IGNORED_FILE_LIMIT, '-print0'],
         { cwd: this.root },
       )
-      const keep = small.stdout.split('\0').filter(Boolean).map(path => path.slice(2))
+      const keep = small.stdout
+        .split('\0')
+        .filter(Boolean)
+        .map(path => path.slice(2))
       if (keep.length > 0) await this.git(['add', '-f', '--', ...keep], { isLenient: true })
     }
   }

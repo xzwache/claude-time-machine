@@ -71,26 +71,40 @@ export function paneView(table: Table, data: PaneData, on: PaneHandlers): Render
     <Box flexDirection="column">
       {data.notice !== '' && <Text color="yellow">{clip(data.notice, columns)}</Text>}
       {list.length === 0 && <Text dimColor>No snapshots yet. They appear after Claude changes files.</Text>}
-      {list.slice(0, room).map((one, i) => row(`e-${i}`, one.id === chosen, `${i + 1}. ${entryLine(one)}`, () => on.select(one.id)))}
+      {list
+        .slice(0, room)
+        .map((one, i) => row(`e-${i}`, one.id === chosen, `${i + 1}. ${entryLine(one)}`, () => on.select(one.id)))}
       {entry && shown && focus && (
         <Box flexDirection="column" marginTop={1}>
           <Text bold>{clip(`${kindLabel(entry)} · ${entry.title}`, columns)}</Text>
-          {entry.prompt !== '' && entry.prompt !== entry.title && <Text dimColor>{clip(`› ${oneLine(entry.prompt)}`, columns * 2)}</Text>}
+          {entry.prompt !== '' && entry.prompt !== entry.title && (
+            <Text dimColor>{clip(`› ${oneLine(entry.prompt)}`, columns * 2)}</Text>
+          )}
           {entry.answer !== '' && <Text dimColor>{clip(`‹ ${oneLine(entry.answer)}`, columns * 2)}</Text>}
           {shown.steps.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
               {row('s-all', shown.id === entry.id, `whole turn  ${countsShort(entry)}`, () => on.showStep(entry.id))}
-              {shown.steps.slice(0, 15).map((step, i) =>
-                row(`s-${i}`, shown.id === step.id, `  ${i + 1}. ${stepLabel(step)}  ${countsShort(step)}`, () => on.showStep(step.id)),
-              )}
+              {shown.steps
+                .slice(0, 15)
+                .map((step, i) =>
+                  row(`s-${i}`, shown.id === step.id, `  ${i + 1}. ${stepLabel(step)}  ${countsShort(step)}`, () =>
+                    on.showStep(step.id),
+                  ),
+                )}
             </Box>
           )}
           <Box flexDirection="column" marginTop={1}>
             {shown.changes.length === 0 && <Text dimColor>No file changes.</Text>}
-            {shown.changes.slice(0, 30).map((change, i) =>
-              row(`f-${i}`, change.path === shown.file, `${statusMark(change)} ${change.path}`, () => on.showFile(change.path)),
+            {shown.changes
+              .slice(0, 30)
+              .map((change, i) =>
+                row(`f-${i}`, change.path === shown.file, `${statusMark(change)} ${change.path}`, () =>
+                  on.showFile(change.path),
+                ),
+              )}
+            {shown.changes.length + shown.more > 30 && (
+              <Text dimColor>…and {shown.changes.length + shown.more - 30} more</Text>
             )}
-            {shown.changes.length + shown.more > 30 && <Text dimColor>…and {shown.changes.length + shown.more - 30} more</Text>}
           </Box>
           {focus.parent !== null && (
             <Box flexDirection="row" gap={1} marginTop={1}>

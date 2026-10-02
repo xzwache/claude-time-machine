@@ -57,7 +57,9 @@ export const register: Register = on => {
     await quietly($, (tm, session) => tm.beginTurn(e.turnId, e.text, session))
     const took = Date.now() - started
     if (took > SLOW_SNAPSHOT_MS) {
-      $.ui.toast(`⏱ Snapshot took ${(took / 1000).toFixed(1)}s. List big folders in .tmignore or .gitignore to speed it up.`)
+      $.ui.toast(
+        `⏱ Snapshot took ${(took / 1000).toFixed(1)}s. List big folders in .tmignore or .gitignore to speed it up.`,
+      )
     }
 
     return next(e)
@@ -206,7 +208,10 @@ async function machine($: EngineInterface): Promise<TimeMachine> {
 
 async function digest(text: string): Promise<string> {
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
-  return [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('').slice(0, 16)
+  return [...new Uint8Array(hash)]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 16)
 }
 
 /**
@@ -268,7 +273,10 @@ function report($: EngineInterface, error: unknown): string {
  * Runs snapshot work for a hook, only in `auto` mode, never failing the hook:
  * a time machine error must not stop Claude's turn.
  */
-async function quietly($: EngineInterface, work: (tm: TimeMachine, session: string) => Promise<unknown>): Promise<void> {
+async function quietly(
+  $: EngineInterface,
+  work: (tm: TimeMachine, session: string) => Promise<unknown>,
+): Promise<void> {
   try {
     if ((await modeOf($)) !== 'auto') return
     await work(await machine($), await $.session.id())

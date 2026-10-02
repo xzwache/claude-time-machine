@@ -31,7 +31,9 @@ export async function prune(shadow: ShadowRepo, history: History, options: Prune
   const rootIndex = starts.length > 0 ? Math.max(...starts) : 0
   const root = raws[rootIndex]
   const removed = raws.length - rootIndex - 1
-  if (root === undefined || removed === 0) return { removed: 0, kept: raws.length, bytesBefore, bytesAfter: bytesBefore }
+  if (root === undefined || removed === 0) {
+    return { removed: 0, kept: raws.length, bytesBefore, bytesAfter: bytesBefore }
+  }
 
   const tip = await shadow.tip()
   const rewritten = new Map<string, string>()

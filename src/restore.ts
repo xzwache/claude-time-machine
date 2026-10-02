@@ -24,7 +24,12 @@ export type RestoreReport = {
  * a turn, that is what Claude's steps changed. A file changed again since is
  * a conflict and stays as it is, unless `isForced`.
  */
-export async function undo(shadow: ShadowRepo, history: History, entry: Entry, isForced: boolean): Promise<RestoreReport> {
+export async function undo(
+  shadow: ShadowRepo,
+  history: History,
+  entry: Entry,
+  isForced: boolean,
+): Promise<RestoreReport> {
   if (!entry.parent) throw new Error('The baseline has nothing before it to go back to')
   const plans = await history.plan(entry)
   const current = await recordCurrent(shadow)
@@ -34,7 +39,8 @@ export async function undo(shadow: ShadowRepo, history: History, entry: Entry, i
   const isConflict = (plan: PathPlan) => !isForced && (changedSince.has(plan.path) || plan.isTainted)
   const apply = pending.filter(plan => !isConflict(plan))
   await applyPlans(shadow, apply)
-  const done = apply.length === 0 ? undefined : await recordRestore(shadow, history, 'undo', undoTitle(entry.title), entry.id)
+  const done =
+    apply.length === 0 ? undefined : await recordRestore(shadow, history, 'undo', undoTitle(entry.title), entry.id)
   return {
     restored: apply.filter(plan => !plan.isNew && plan.lastStatus !== 'deleted').map(plan => plan.path),
     removed: apply.filter(plan => plan.isNew).map(plan => plan.path),
@@ -63,8 +69,16 @@ export async function travel(shadow: ShadowRepo, history: History, entry: Entry)
   )
   const title = `Travel to: ${entry.title}`
   const done = changes.length === 0 ? undefined : await recordRestore(shadow, history, 'travel', title, entry.id)
-  const paths = (status: Change['status']) => changes.filter(change => change.status === status).map(change => change.path)
-  return { restored: paths('modified'), removed: paths('deleted'), recovered: paths('added'), conflicts: [], unchanged: [], entry: done }
+  const paths = (status: Change['status']) =>
+    changes.filter(change => change.status === status).map(change => change.path)
+  return {
+    restored: paths('modified'),
+    removed: paths('deleted'),
+    recovered: paths('added'),
+    conflicts: [],
+    unchanged: [],
+    entry: done,
+  }
 }
 
 async function recordCurrent(shadow: ShadowRepo): Promise<{ commit: string; tree: string }> {
@@ -92,7 +106,10 @@ async function applyPlans(shadow: ShadowRepo, plans: PathPlan[]): Promise<void> 
   for (const chunk of chunks(plans.filter(plan => plan.isNew).map(plan => plan.path))) {
     await shadow.git(['rm', '-q', '-f', '-r', '--ignore-unmatch', '--', ...chunk])
   }
-  for (const [source, paths] of groupBy(plans.filter(plan => !plan.isNew), plan => plan.before)) {
+  for (const [source, paths] of groupBy(
+    plans.filter(plan => !plan.isNew),
+    plan => plan.before,
+  )) {
     for (const chunk of chunks(paths)) await shadow.git(['checkout', source, '--', ...chunk])
   }
 }
@@ -122,6 +139,10 @@ function groupBy(plans: PathPlan[], key: (plan: PathPlan) => string): Map<string
 function assertSafePath(path: string): void {
   const parts = path.split('/')
   const isSafe =
-    path !== '' && !path.startsWith('/') && !path.includes('\0') && parts[0] !== '.git' && parts.every(part => part !== '..' && part !== '')
+    path !== '' &&
+    !path.startsWith('/') &&
+    !path.includes('\0') &&
+    parts[0] !== '.git' &&
+    parts.every(part => part !== '..' && part !== '')
   if (!isSafe) throw new Error(`Refusing to restore an unsafe path: ${JSON.stringify(path)}`)
 }

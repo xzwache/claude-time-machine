@@ -3,7 +3,19 @@
 
 import type { Exec, TimeMachine } from './index.ts'
 import { deleteProject, listProjects } from './index.ts'
-import { clip, countsShort, kindLabel, logText, oneLine, plural, projectLine, restoreText, size, statusMark, stepLabel } from './format.ts'
+import {
+  clip,
+  countsShort,
+  kindLabel,
+  logText,
+  oneLine,
+  plural,
+  projectLine,
+  restoreText,
+  size,
+  statusMark,
+  stepLabel,
+} from './format.ts'
 import type { Entry, Mode } from '../types'
 
 export type Host = {
@@ -47,7 +59,10 @@ export const HELP = [
 ].join('\n')
 
 export async function runCommand(host: Host, args: string): Promise<string> {
-  const words = args.trim().split(/\s+/).filter(word => word !== '')
+  const words = args
+    .trim()
+    .split(/\s+/)
+    .filter(word => word !== '')
   const [verb = '', ...rest] = words
   const flags = new Set(rest.filter(word => word.startsWith('--')))
   const arg = rest.find(word => !word.startsWith('--'))
@@ -165,7 +180,9 @@ async function showText(tm: TimeMachine, entry: Entry, number: string): Promise<
   return [
     `${kindLabel(entry)} · ${entry.title} (${entry.id.slice(0, 7)})`,
     ...entry.changes.map(change => `  ${statusMark(change)} ${change.path}`),
-    ...(steps.length > 0 ? ['Steps:', ...steps.map((step, i) => `  ${number}.${i + 1} ${stepLabel(step)}  ${countsShort(step)}`)] : []),
+    ...(steps.length > 0
+      ? ['Steps:', ...steps.map((step, i) => `  ${number}.${i + 1} ${stepLabel(step)}  ${countsShort(step)}`)]
+      : []),
     ...(entry.answer !== '' ? ['Answer:', `  ${clip(oneLine(entry.answer), 400)}`] : []),
   ].join('\n')
 }
@@ -197,7 +214,12 @@ function isRef(word: string): boolean {
 
 async function pruneCommand(host: Host, tm: TimeMachine, arg: string | undefined): Promise<string> {
   const days = daysOf(arg)
-  const options = days !== undefined ? { olderThanMs: days * DAY_MS } : arg !== undefined && /^\d+$/.test(arg) ? { keepLast: Number(arg) } : undefined
+  const options =
+    days !== undefined
+      ? { olderThanMs: days * DAY_MS }
+      : arg !== undefined && /^\d+$/.test(arg)
+        ? { keepLast: Number(arg) }
+        : undefined
   if (!options) return 'Usage: /tm prune 30d (older than 30 days) or /tm prune 50 (keep the newest 50).'
   const done = await tm.prune(options)
   await host.refresh(tm)
@@ -244,7 +266,8 @@ async function resolveRef(tm: TimeMachine, list: Entry[], ref: string | undefine
   }
   const byNumber = /^\d{1,3}$/.test(ref) ? list[Number(ref) - 1] : undefined
   const name = ref.replace(/^["']|["']$/g, '')
-  const entry = byNumber ?? (/^[0-9a-f]{4,64}$/.test(ref) ? await tm.entry(ref) : undefined) ?? (await tm.findCheckpoint(name))
+  const entry =
+    byNumber ?? (/^[0-9a-f]{4,64}$/.test(ref) ? await tm.entry(ref) : undefined) ?? (await tm.findCheckpoint(name))
   if (!entry) throw new Error(`No snapshot or checkpoint "${name}" (see /tm log)`)
   return entry
 }

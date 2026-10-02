@@ -56,14 +56,14 @@ keeps the last 100 checkpoints per session for about 30 days, and can also rewin
 conversation. If that is all you need, you may not need this mod. The time machine is for what
 `/rewind` leaves out:
 
-| | `/rewind` | Time machine |
-| --- | --- | --- |
-| Changes made through Bash (`rm`, `mv`, codegen, formatters) | not tracked | tracked as steps |
-| Undo one step of a turn | no | yes |
-| Your edits during a turn | overwritten | kept, or flagged as a conflict |
-| Several sessions in one project | per session | one timeline, each session's steps kept apart |
-| History | 100 checkpoints, about 30 days | until you prune it; browsable with plain git |
-| Rewind the conversation | yes | no (the mod API cannot) |
+|                                                             | `/rewind`                      | Time machine                                  |
+| ----------------------------------------------------------- | ------------------------------ | --------------------------------------------- |
+| Changes made through Bash (`rm`, `mv`, codegen, formatters) | not tracked                    | tracked as steps                              |
+| Undo one step of a turn                                     | no                             | yes                                           |
+| Your edits during a turn                                    | overwritten                    | kept, or flagged as a conflict                |
+| Several sessions in one project                             | per session                    | one timeline, each session's steps kept apart |
+| History                                                     | 100 checkpoints, about 30 days | until you prune it; browsable with plain git  |
+| Rewind the conversation                                     | yes                            | no (the mod API cannot)                       |
 
 The two work side by side.
 
@@ -92,24 +92,24 @@ After every turn that changed files, a band above the prompt shows what changed,
 **Undo turn** (`u`) and **Review** (`r`). The status line shows how many turns are on the
 timeline.
 
-| Command | What it does |
-| --- | --- |
-| `/tm` | Opens the Time machine pane. It shows the timeline. For a turn, it shows the prompt, Claude's answer, the steps, the files and the diff of each file. Its buttons are **Undo this**, **Travel to before** and **Travel to after**; travel asks for a second press. |
-| `/tm log [N] [--session]` | Lists snapshots, newest first. With `--session`, lists only this session's. |
-| `/tm show N` | Shows the files, steps and answer of snapshot N. `N` is a number from `/tm log`, or a commit id. |
-| `/tm undo [N\|N.k] [--force]` | Reverts turn N, or its step k, and leaves everything else alone. With no argument, reverts the latest turn. |
-| `/tm redo` | Undoes the latest undo. |
-| `/tm travel N\|name` | Puts every tracked file back to how it was at snapshot N, or at a saved checkpoint. |
-| `/tm save [name]` | Saves the work tree now as a named checkpoint, even if nothing changed. |
-| `/tm on`, `/tm off`, `/tm manual` | Sets this project's mode. `on` snapshots every turn, `off` takes no snapshots, and `manual` snapshots only on `/tm save`. The mode is kept across sessions, and the history stays in every mode. Until you set a mode, a git project is `on` and any other folder is `off`, so starting Claude in `~` or `/tmp` never snapshots everything under it. Your home folder and `/` can never be turned on. |
-| `/tm prune 30d` or `/tm prune 50` | Forgets snapshots older than 30 days, or keeps only the newest 50. The oldest kept state becomes the new baseline. |
-| `/tm commit [N] [message] [--force]` | Commits what turn N changed (default: the latest turn) to your current branch, each file as the turn left it. Your other changes, your work tree and the rest of your index are not touched. Files your repo ignores (such as `.env`) are left out. Refuses during a merge or rebase. Without `--force`, it also refuses if you have staged changes to the same files. |
-| `/tm branch N name` | Creates branch `name` in your repo: a commit on top of `HEAD` with every file as it was at snapshot N. `HEAD`, the index and your files do not change. |
-| `/tm patch [N]` | Writes turn N as a patch file to `~/.claude/time-machine/patches/`, binary files included, and copies it to the clipboard. Apply it with `git apply`. |
-| `/tm retain 30d` or `/tm retain off` | Prunes snapshots older than 30 days, now and then once a day at session start. |
-| `/tm stats` | Shows the snapshot count, disk use and mode for this project. |
-| `/tm projects [rm N --yes]` | Lists every project that has a history, with its size, last activity and whether its folder still exists. `rm N --yes` deletes project N's history. |
-| `/tm git` | Prints the `git` command for browsing the timeline yourself. |
+| Command                              | What it does                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/tm`                                | Opens the Time machine pane. It shows the timeline. For a turn, it shows the prompt, Claude's answer, the steps, the files and the diff of each file. Its buttons are **Undo this**, **Travel to before** and **Travel to after**; travel asks for a second press.                                                                                                                                    |
+| `/tm log [N] [--session]`            | Lists snapshots, newest first. With `--session`, lists only this session's.                                                                                                                                                                                                                                                                                                                           |
+| `/tm show N`                         | Shows the files, steps and answer of snapshot N. `N` is a number from `/tm log`, or a commit id.                                                                                                                                                                                                                                                                                                      |
+| `/tm undo [N\|N.k] [--force]`        | Reverts turn N, or its step k, and leaves everything else alone. With no argument, reverts the latest turn.                                                                                                                                                                                                                                                                                           |
+| `/tm redo`                           | Undoes the latest undo.                                                                                                                                                                                                                                                                                                                                                                               |
+| `/tm travel N\|name`                 | Puts every tracked file back to how it was at snapshot N, or at a saved checkpoint.                                                                                                                                                                                                                                                                                                                   |
+| `/tm save [name]`                    | Saves the work tree now as a named checkpoint, even if nothing changed.                                                                                                                                                                                                                                                                                                                               |
+| `/tm on`, `/tm off`, `/tm manual`    | Sets this project's mode. `on` snapshots every turn, `off` takes no snapshots, and `manual` snapshots only on `/tm save`. The mode is kept across sessions, and the history stays in every mode. Until you set a mode, a git project is `on` and any other folder is `off`, so starting Claude in `~` or `/tmp` never snapshots everything under it. Your home folder and `/` can never be turned on. |
+| `/tm prune 30d` or `/tm prune 50`    | Forgets snapshots older than 30 days, or keeps only the newest 50. The oldest kept state becomes the new baseline.                                                                                                                                                                                                                                                                                    |
+| `/tm commit [N] [message] [--force]` | Commits what turn N changed (default: the latest turn) to your current branch, each file as the turn left it. Your other changes, your work tree and the rest of your index are not touched. Files your repo ignores (such as `.env`) are left out. Refuses during a merge or rebase. Without `--force`, it also refuses if you have staged changes to the same files.                                |
+| `/tm branch N name`                  | Creates branch `name` in your repo: a commit on top of `HEAD` with every file as it was at snapshot N. `HEAD`, the index and your files do not change.                                                                                                                                                                                                                                                |
+| `/tm patch [N]`                      | Writes turn N as a patch file to `~/.claude/time-machine/patches/`, binary files included, and copies it to the clipboard. Apply it with `git apply`.                                                                                                                                                                                                                                                 |
+| `/tm retain 30d` or `/tm retain off` | Prunes snapshots older than 30 days, now and then once a day at session start.                                                                                                                                                                                                                                                                                                                        |
+| `/tm stats`                          | Shows the snapshot count, disk use and mode for this project.                                                                                                                                                                                                                                                                                                                                         |
+| `/tm projects [rm N --yes]`          | Lists every project that has a history, with its size, last activity and whether its folder still exists. `rm N --yes` deletes project N's history.                                                                                                                                                                                                                                                   |
+| `/tm git`                            | Prints the `git` command for browsing the timeline yourself.                                                                                                                                                                                                                                                                                                                                          |
 
 ### Keep paths out: `.tmignore`
 
@@ -169,18 +169,19 @@ turn.complete     →  full snapshot (leftovers are "not Claude"), then a turn m
   shallow clone of [microsoft/TypeScript](https://github.com/microsoft/TypeScript) (66,945
   files, 421 MB, Linux, SSD):
 
-  | Operation | Time |
-  | --- | --- |
-  | First snapshot (once per project) | 9.7 s |
-  | Packing that snapshot (background) | 12.7 s, 284 MB → 44 MB |
-  | Turn start | 0.29 s |
-  | Bash call that is not read-only (before + after) | 0.16 s + 0.34 s |
-  | Edit or Write (before + after) | 0.29 s |
-  | Turn end | 0.41 s |
-  | Undo a turn | 0.72 s |
+  | Operation                                        | Time                   |
+  | ------------------------------------------------ | ---------------------- |
+  | First snapshot (once per project)                | 9.7 s                  |
+  | Packing that snapshot (background)               | 12.7 s, 284 MB → 44 MB |
+  | Turn start                                       | 0.29 s                 |
+  | Bash call that is not read-only (before + after) | 0.16 s + 0.34 s        |
+  | Edit or Write (before + after)                   | 0.29 s                 |
+  | Turn end                                         | 0.41 s                 |
+  | Undo a turn                                      | 0.72 s                 |
 
   A turn with three edits and two writing Bash calls therefore costs about 2.5 s on a project
   this size. Projects of a few thousand files cost a small fraction of that.
+
 - **Restores.** They use `git checkout <commit> -- <paths>` and `git rm`. These restore content,
   the executable bit and symlinks exactly. They refuse to write through symlinked directories,
   and they remove directories they leave empty. The shadow repository's `info/attributes` turns
@@ -194,18 +195,18 @@ turn.complete     →  full snapshot (leftovers are "not Claude"), then a turn m
 - **Code layout.** Only `hooks/register.tsx` touches the Claude Code API: the hooks, the state,
   and the handlers. The rest is plain TypeScript, tested under Node:
 
-  | File | Role |
-  | --- | --- |
-  | `core.ts` | The `TimeMachine`: snapshots, undo, travel, save and prune |
-  | `timeline.ts` | Reading commits and folding them into turns |
-  | `message.ts` | The commit message format |
-  | `git.ts` | Pinned git settings |
-  | `projects.ts` | `/tm projects` |
-  | `export.ts` | `/tm commit` and `/tm branch`: the only writes to your repository |
-  | `bash.ts` | The read-only command check |
-  | `commands.ts` | `/tm` |
-  | `view.tsx` | The band and the pane |
-  | `format.ts` | Shared text |
+  | File          | Role                                                              |
+  | ------------- | ----------------------------------------------------------------- |
+  | `core.ts`     | The `TimeMachine`: snapshots, undo, travel, save and prune        |
+  | `timeline.ts` | Reading commits and folding them into turns                       |
+  | `message.ts`  | The commit message format                                         |
+  | `git.ts`      | Pinned git settings                                               |
+  | `projects.ts` | `/tm projects`                                                    |
+  | `export.ts`   | `/tm commit` and `/tm branch`: the only writes to your repository |
+  | `bash.ts`     | The read-only command check                                       |
+  | `commands.ts` | `/tm`                                                             |
+  | `view.tsx`    | The band and the pane                                             |
+  | `format.ts`   | Shared text                                                       |
 
   `types/index.d.ts` is the state contract.
 

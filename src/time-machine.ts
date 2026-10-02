@@ -194,9 +194,12 @@ export class TimeMachine {
       const entry = await this.log.entry(id)
       const plan = entry && (await this.log.plan(entry)).find(one => one.path === path)
       if (!plan) return ''
-      return this.shadow.git(['diff', '--no-color', '--no-ext-diff', '--no-renames', plan.before, plan.after, '--', path], {
-        trim: false,
-      })
+      return this.shadow.git(
+        ['diff', '--no-color', '--no-ext-diff', '--no-renames', plan.before, plan.after, '--', path],
+        {
+          trim: false,
+        },
+      )
     })
   }
 
@@ -240,7 +243,17 @@ export class TimeMachine {
       for (const [key, paths] of pairs) {
         const [before = '', after = ''] = key.split(' ')
         for (const chunk of chunks(paths)) {
-          const args = ['diff', '--binary', '--no-color', '--no-ext-diff', '--no-renames', before, after, '--', ...chunk]
+          const args = [
+            'diff',
+            '--binary',
+            '--no-color',
+            '--no-ext-diff',
+            '--no-renames',
+            before,
+            after,
+            '--',
+            ...chunk,
+          ]
           patch += await this.shadow.git(args, { trim: false })
         }
       }
