@@ -6,12 +6,20 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-02
+
 ### Added
 
 - `/tm heat`: where Claude worked, as a treemap of the project in a pane (folder by folder, colored by Claude's
   churn, rework, undos or Claude's share against everyone else's) plus the hottest files. Picking a file lists the
   turns that changed it.
 - `/tm heat open`: the same map as a self-contained, zoomable HTML page opened in the browser.
+- `npm run sandbox` for contributors: a throwaway project with a real history, and `--run` to run every `/tm`
+  command on it through `claude -p`.
+
+### Changed
+
+- The README has license and support sections.
 
 ## [0.5.0] - 2026-10-02
 
@@ -83,5 +91,6 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 - First release: a snapshot before and after every turn in a shadow git repository, `/tm` pane, `/tm undo`,
   `/tm redo`, `/tm travel`, `/tm log`.
 
-[Unreleased]: https://github.com/xzwache/claude-time-machine/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/xzwache/claude-time-machine/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/xzwache/claude-time-machine/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/xzwache/claude-time-machine/releases/tag/v0.5.0
