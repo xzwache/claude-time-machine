@@ -7,9 +7,23 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
+import vm from 'node:vm'
 
+import {
+  METRIC_UNITS,
+  describe as describeNode,
+  heatText,
+  heatTree,
+  nodeAt,
+  turnsOf,
+  valueLabel,
+  viewOf,
+} from '../src/heat.ts'
+import type { FileHeat, Heat } from '../src/heat.ts'
+import { heatPage, pageLibrary } from '../src/heat-page.ts'
 import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
 import type { Deps, ExecResult } from '../src/index.ts'
+import { heatColor, rasterCells, squarify } from '../src/treemap.ts'
 
 const deps: Deps = {
   exec: (argv, init) =>
@@ -625,5 +639,147 @@ describe('taking snapshots into the project repository', () => {
     assert.equal(await sh('git', 'show', 'tm/pkg:src/user.ts'), 'user\n')
     await tm.commitTo(entry.id, undefined, false)
     assert.equal((await sh('git', 'show', '--name-only', '--format=', 'HEAD')).trim(), 'pkg/app.ts')
+  })
+})
+
+describe('the heat map', () => {
+  test('counts Claude lines, later turns, undos and lines changed by others per file', async () => {
+    const first = await turn('first', () => put('src/auth.ts', 'A\nB\nC\n'))
+    await put('src/auth.ts', 'A\nB\nC\nmine\n')
+    const second = await turn('second', async () => {
+      await put('src/auth.ts', 'A\nB\nC\nmine\nD\n')
+      await put('lib/util.ts', 'u\n')
+    })
+    const third = await turn('third', () => put('src/user.ts', 'user\nmore\n'))
+    assert.ok(first && second && third)
+    await tm.undo(third.id)
+
+    const heat = await tm.heat()
+    const byPath = new Map(heat.files.map(one => [one.path, one]))
+    assert.equal(heat.turns, 3)
+    assert.deepEqual(byPath.get('src/auth.ts'), {
+      path: 'src/auth.ts',
+      claude: 3,
+      edits: 2,
+      turns: 2,
+      undos: 0,
+      others: 1,
+      turnIds: [second.id, first.id],
+    })
+    assert.equal(byPath.get('lib/util.ts')?.claude, 1)
+    assert.equal(byPath.get('src/user.ts')?.undos, 1)
+    assert.deepEqual(turnsOf(heat, 'src/auth.ts'), [second.id, first.id])
+
+    const tree = heatTree(heat.files)
+    assert.equal(tree.files, 3)
+    assert.equal(nodeAt(tree, 'src')?.rework, 1)
+    assert.equal(nodeAt(tree, 'src')?.claude, 4)
+    assert.match(heatText(heat, 'rework', 5), /src\/auth\.ts\s+back in 1 later turn/)
+    assert.match(heatText(heat, 'undo', 5), /src\/user\.ts\s+1 undo/)
+  })
+
+  test('only counts the window asked for', async () => {
+    await turn('old', () => put('src/auth.ts', 'A\nB\n'))
+    const heat = await tm.heat(Date.now() + 60_000)
+    assert.deepEqual(heat.files, [])
+    assert.equal(heat.turns, 0)
+  })
+
+  test('splits a batch whose output is cut off, and leaves out a single commit that still is', async () => {
+    const big = await turn('big', () => put('src/auth.ts', 'A\nbig\n'))
+    await turn('small', () => put('src/user.ts', 'user\nsmall\n'))
+    assert.ok(big)
+    const [bigStep = ''] = big.steps
+    const cutting: Deps = {
+      ...deps,
+      exec: async (argv, init) => {
+        const result = await deps.exec(argv, init)
+        const isCut = argv.includes('--numstat') && (init.stdin ?? '').includes(bigStep)
+        return isCut ? { ...result, stdout: result.stdout.slice(0, 10), isStdoutTruncated: true } : result
+      },
+    }
+    tm.use(cutting)
+    const heat = await tm.heat()
+    tm.use(deps)
+    assert.deepEqual(
+      heat.files.map(one => one.path),
+      ['src/user.ts'],
+    )
+  })
+})
+
+describe('the heat map drawing', () => {
+  const file = (path: string, claude: number, others = 0): FileHeat => ({
+    path,
+    claude,
+    edits: 1,
+    turns: 1,
+    undos: 0,
+    others,
+    turnIds: [],
+  })
+  const files = [file('src/app/a.ts', 40), file('src/app/b.ts', 10, 5), file('src/app/deep/c.ts', 5)]
+  const heat: Heat = { files, turns: 2, since: 0 }
+
+  test('squarify fills the rectangle without overlaps', () => {
+    const rects = squarify([6, 6, 4, 3, 2, 2, 1], { x: 0, y: 0, w: 6, h: 4 })
+    const area = rects.reduce((sum, r) => sum + r.w * r.h, 0)
+    assert.ok(Math.abs(area - 24) < 1e-9)
+    for (const r of rects) assert.ok(r.x >= -1e-9 && r.y >= -1e-9 && r.x + r.w <= 6 + 1e-9 && r.y + r.h <= 4 + 1e-9)
+    for (const [i, a] of rects.entries()) {
+      for (const b of rects.slice(i + 1)) {
+        const overlap =
+          Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) *
+          Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
+        assert.ok(overlap < 1e-9)
+      }
+    }
+  })
+
+  test('a folder of one folder is skipped on the way down and on the way up', () => {
+    const tree = heatTree(files)
+    const top = viewOf(tree, heat, { path: '', metric: 'churn', from: null })
+    assert.equal(top.path, 'src/app')
+    assert.equal(top.parent, null)
+    assert.deepEqual(
+      top.nodes.map(node => node.name),
+      ['a.ts', 'b.ts', 'deep'],
+    )
+    assert.equal(top.nodes[0]?.children, undefined)
+    const deep = viewOf(tree, heat, { path: 'src/app/deep', metric: 'rework', from: 5 })
+    assert.equal(deep.parent, 'src/app')
+    assert.equal(deep.from, 5)
+  })
+
+  test('terminal cells are whole triplets with the labels in them', () => {
+    const view = viewOf(heatTree(files), heat, { path: '', metric: 'churn', from: null })
+    const bytes = Buffer.from(rasterCells(view.nodes, 'churn', 40, 8), 'base64')
+    assert.equal(bytes.length, 40 * 8 * 12)
+    const words = new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.length / 4)
+    const text = Array.from({ length: 40 * 8 }, (_, i) => String.fromCodePoint(words[i * 3] ?? 32)).join('')
+    assert.match(text, /a\.ts/)
+  })
+
+  test('the page runs the same layout, colors and labels as the pane', () => {
+    const context = vm.createContext({})
+    vm.runInContext(
+      `${pageLibrary()}\nglobalThis.lib = { squarify, heatColor, valueLabel, describe, intensity }`,
+      context,
+    )
+    const lib = context.lib as Record<string, (...args: unknown[]) => unknown>
+    const tree = heatTree(files)
+    const rect = { x: 0, y: 0, w: 300, h: 200 }
+    assert.deepEqual(JSON.parse(JSON.stringify(lib.squarify?.([5, 3, 1], rect))), squarify([5, 3, 1], rect))
+    assert.equal(lib.heatColor?.(0.7, 'churn'), heatColor(0.7, 'churn'))
+    assert.equal(lib.describe?.(tree), describeNode(tree))
+    assert.equal(lib.valueLabel?.(tree, 'owner', METRIC_UNITS), valueLabel(tree, 'owner', METRIC_UNITS))
+  })
+
+  test('no file name can break out of the page', () => {
+    const tree = heatTree([file('x/</script><b>.ts', 3), file('y/\u2028.ts', 1)])
+    const page = heatPage({ project: '/work/p', tree, turns: 1, since: 0, made: 0 })
+    assert.equal(page.match(/<\/script>/g)?.length, 1)
+    assert.doesNotMatch(page, /\u2028/)
+    assert.doesNotMatch(page, /(src|href)="https?:/)
   })
 })

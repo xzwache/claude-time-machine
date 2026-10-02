@@ -16,6 +16,31 @@ the name of a saved checkpoint (`"before refactor"`).
 In the pane, **Undo this** reverts the selected turn or step. **Travel to before** and **Travel to after** move the
 whole project and ask for a second press.
 
+## Heat map
+
+| Command                                | What it does                                                                                                                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/tm heat [30d] [rework\|undo\|owner]` | Lists the hottest files and opens the Heat pane: a treemap of the project, one folder at a time.                                                                           |
+| `/tm heat open [30d]`                  | Writes the map as one self-contained HTML page to `~/.claude/time-machine/heat/` and opens it in your browser: zoom into folders, hover for numbers, filter the file list. |
+
+In the pane, pick a folder to go in and `b` to go back up; `1` to `4` change the color; `o` opens the page. Picking a
+file lists the turns that changed it, and picking one of those opens it in the Time machine pane, ready to review or
+undo.
+
+Size is every line changed in a file. The color is one of:
+
+| Color    | What it counts                                                                                      |
+| -------- | --------------------------------------------------------------------------------------------------- |
+| `churn`  | Lines added plus deleted by Claude's steps.                                                         |
+| `rework` | Later turns that changed a file Claude had already changed: the places Claude keeps coming back to. |
+| `undo`   | Undos that put the file back.                                                                       |
+| `owner`  | Claude's share of the lines changed, from blue (others) to orange (Claude).                         |
+
+"Others" is everything that was not one of Claude's tools: you, your editor, a formatter on save, a `git pull` or a
+branch switch. These are counts of what happened, not a verdict on the code: a file can be hot because it is where the
+work is. The window is the history you kept; `30d` narrows it. A single change too large to read (a checkout of tens of
+thousands of files) is left out. The page uses no network and no model calls.
+
 ## Going back
 
 | Command                       | What it does                                                                                                                                                                      |

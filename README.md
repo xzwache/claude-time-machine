@@ -82,6 +82,7 @@ After a turn that changed files, a band above the prompt offers **Undo turn** (`
 | `/tm save "before refactor"`    | Bookmark now; `/tm travel "before refactor"` comes back             |
 | `/tm commit` · `/tm branch 3 x` | Turn a turn into a commit on your branch · snapshot 3 into branch x |
 | `/tm patch`                     | The latest turn as a patch file                                     |
+| `/tm heat` · `/tm heat open`    | Map of where Claude worked · the same map in your browser           |
 
 All commands, modes and settings: [docs/commands.md](docs/commands.md).
 

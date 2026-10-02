@@ -6,6 +6,13 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+### Added
+
+- `/tm heat`: where Claude worked, as a treemap of the project in a pane (folder by folder, colored by Claude's
+  churn, rework, undos or Claude's share against everyone else's) plus the hottest files. Picking a file lists the
+  turns that changed it.
+- `/tm heat open`: the same map as a self-contained, zoomable HTML page opened in the browser.
+
 ## [0.5.0] - 2026-10-02
 
 ### Changed

@@ -207,3 +207,83 @@ describe('the pane', () => {
     }
   })
 })
+
+// A step and an outside commit, as `git log` and `diff-tree --numstat` print them for /tm heat.
+const STEP = 'b'.repeat(40)
+const OUTSIDE = 'c'.repeat(40)
+const HEAT_LOG = [
+  `\x1e${STEP}\x1f1700000100\x1fEdit src/app.ts\x1ftm-kind: step\ntm-session: s1\n`,
+  `\x1e${OUTSIDE}\x1f1700000000\x1fChanges outside Claude\x1ftm-kind: outside\n`,
+].join('')
+const NUMSTAT = [STEP, '12\t3\tsrc/app.ts', '4\t0\tdocs/readme.md', OUTSIDE, '2\t2\tsrc/app.ts', ''].join('\0')
+const HEAT_ANSWERS = { '--format=%x1e%H%x1f%ct%x1f%s%x1f%<(300,trunc)%b': HEAT_LOG, '--numstat': NUMSTAT }
+const HEAT_PANE = { ...PANE, requestId: 'time-machine-heat' }
+
+describe('the heat map', () => {
+  test('/tm heat lists the hottest files and draws the map on every surface', async ($, on) => {
+    fakeHost(on, HEAT_ANSWERS)
+    on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+    const ran = await $.command.run(typed('heat'))
+    expect(ran.text).toMatch(/1\. \S+ src\/app\.ts\s+15 lines, 1 edit/)
+    expect(ran.text).toMatch(/2\. \S+ docs\/readme\.md\s+4 lines/)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...HEAT_PANE, surface })
+      expect(await ui.find({ key: 'm-rework' })).toBeDefined()
+      expect(await ui.find({ key: 'up' })).toBeUndefined()
+      if (surface === 'terminal') expect(await ui.find({ type: 'Raster', key: 'heat-map' })).toBeDefined()
+      else expect(await ui.find({ type: 'Svg' })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('the pane goes into a folder and back up, and changes the color', async ($, on) => {
+    fakeHost(on, HEAT_ANSWERS)
+    on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+    await $.command.run(typed('heat'))
+    const ui = await $.ui.mount({ ...HEAT_PANE, surface: 'terminal' })
+    expect(await ui.find({ key: 'n-0', text: /src\// })).toBeDefined()
+    await ui.press({ key: 'n-0' })
+    expect(await ui.find({ key: 'n-0', text: /app\.ts/ })).toBeDefined()
+    await ui.press({ key: 'm-owner' })
+    expect(await ui.find({ key: 'n-0', text: /79% Claude/ })).toBeDefined()
+    await ui.press({ key: 'up' })
+    expect(await ui.find({ key: 'n-0', text: /src\// })).toBeDefined()
+    expect(await ui.find({ key: 'up' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('picking a file lists the turns that changed it', async ($, on) => {
+    fakeHost(on, HEAT_ANSWERS)
+    on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+    await $.command.run(typed('heat'))
+    const ui = await $.ui.mount({ ...HEAT_PANE, surface: 'terminal' })
+    await ui.press({ key: 'n-0' })
+    await ui.press({ key: 'n-0' })
+    expect(await ui.find({ type: 'Text', text: 'src/app.ts' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /No closed Claude turn changed it/ })).toBeDefined()
+    await ui.press({ key: 'file-close' })
+    expect(await ui.find({ key: 'file-close' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('/tm heat open and the pane button write the page and open it', async ($, on) => {
+    const calls = fakeHost(on, HEAT_ANSWERS)
+    on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+    const ran = await $.command.run(typed('heat open'))
+    expect(ran.text).toMatch(
+      /^Opened the heat map in your browser: \/home\/tester\/\.claude\/time-machine\/heat\/[0-9a-f]{16}\.html$/,
+    )
+    expect(calls.some(argv => argv[0] === 'xdg-open' && argv[1]?.endsWith('.html'))).toBe(true)
+    await $.command.run(typed('heat'))
+    const ui = await $.ui.mount({ ...HEAT_PANE, surface: 'terminal' })
+    await ui.press({ key: 'open' })
+    expect(await ui.find({ type: 'Text', text: 'Opened in your browser.' })).toBeDefined()
+    expect(await ui.find({ type: 'Markdown', text: /\(file:\/\/\/home\/tester\/.+\.html\)/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('/tm heat says so when nothing changed yet', async ($, on) => {
+    fakeHost(on)
+    expect((await $.command.run(typed('heat'))).text).toMatch(/Nothing to map yet/)
+  })
+})

@@ -8,7 +8,13 @@ export type ExecInit = {
   timeoutMs?: number
 }
 
-export type ExecResult = { exitCode: number; stdout: string; stderr: string }
+export type ExecResult = {
+  exitCode: number
+  stdout: string
+  stderr: string
+  /** True when the runner kept only the first part of stdout. */
+  isStdoutTruncated?: boolean
+}
 
 export type Exec = (argv: readonly string[], init: ExecInit) => Promise<ExecResult>
 

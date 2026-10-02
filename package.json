@@ -17,6 +17,7 @@
     "format": "prettier --write .",
     "lint": "prettier --check .",
     "bench": "node scripts/bench.ts",
+    "sandbox": "node scripts/sandbox.ts",
     "check": "npm run lint && npm test && npm run validate && npm run test:mod && npm run typecheck"
   },
   "devDependencies": {

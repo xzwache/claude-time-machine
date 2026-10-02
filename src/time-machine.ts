@@ -15,6 +15,8 @@ import { branchSnapshot, commitPaths } from './export.ts'
 import type { BranchReport, CommitReport } from './export.ts'
 import { chunks, diskUsage } from './git.ts'
 import type { Deps } from './git.ts'
+import { readHeat } from './heat.ts'
+import type { Heat } from './heat.ts'
 import { History } from './history.ts'
 import { firstLine } from './message.ts'
 import type { Meta } from './message.ts'
@@ -266,6 +268,14 @@ export class TimeMachine {
       await this.ready()
       const entries = Number(await this.shadow.git(['rev-list', '--count', TIMELINE])) || 0
       return { entries, bytes: await diskUsage(this.shadow.exec, this.gitDir) }
+    })
+  }
+
+  /** What the timeline did to each file since `sinceMs` (all of it when null). */
+  heat(sinceMs: number | null = null): Promise<Heat> {
+    return this.serial(async () => {
+      await this.ready()
+      return readHeat(this.shadow, sinceMs)
     })
   }
 

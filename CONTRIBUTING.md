@@ -21,6 +21,17 @@ cd /some/git/project
 claude --plugin-dir /path/to/claude-time-machine
 ```
 
+To try every command on a project that already has a history:
+
+```sh
+npm run sandbox               # makes <tmp>/tm-sandbox: turns of Write, Edit and Bash, your edits, an undo
+npm run sandbox -- --run      # also runs every /tm command through `claude -p` and checks its output
+npm run sandbox -- --clean    # deletes the sandbox and its history
+```
+
+`--run` exits non-zero when a command's output is not what it expects. It uses your real `~/.claude`, so Claude Code
+must be signed in; the sandbox's history lives next to your projects' and `--clean` removes it.
+
 ## Layout
 
 | Path                  | What it holds                                                               |
@@ -33,7 +44,11 @@ claude --plugin-dir /path/to/claude-time-machine
 | `src/prune.ts`        | Forgetting old snapshots.                                                   |
 | `src/export.ts`       | `/tm commit` and `/tm branch`: the only writes to the project's repository. |
 | `src/commands.ts`     | `/tm` and its subcommands.                                                  |
-| `src/view.tsx`        | The band and the pane.                                                      |
+| `src/heat.ts`         | `/tm heat`: what the timeline did to each file, as a folder tree.           |
+| `src/treemap.ts`      | Laying the heat map out and painting it.                                    |
+| `src/heat-page.ts`    | The heat map as a self-contained HTML page.                                 |
+| `src/view.tsx`        | The band, the Time machine pane and the Heat pane.                          |
+| `scripts/sandbox.ts`  | A sandbox project with a history, and a run of every command on it.         |
 | `tests/*.spec.ts`     | Node tests against real git in temporary folders.                           |
 | `tests/*.test.tsx`    | Tests inside Claude Code's test engine (`claude plugin test`).              |
 

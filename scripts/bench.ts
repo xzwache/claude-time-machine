@@ -2,32 +2,12 @@
 // Uses a throwaway shadow repository; the project's files are touched only to
 // append one line to one file and put it back.
 
-import { execFile } from 'node:child_process'
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { TimeMachine } from '../src/index.ts'
-import type { Deps, ExecResult } from '../src/index.ts'
-
-const deps: Deps = {
-  exec: (argv, init) =>
-    new Promise<ExecResult>(resolve => {
-      const child = execFile(
-        argv[0] ?? '',
-        argv.slice(1),
-        { cwd: init.cwd, env: { ...process.env, ...init.env }, maxBuffer: 256 * 1024 * 1024, encoding: 'utf8' },
-        (error, stdout, stderr) =>
-          resolve({ exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr }),
-      )
-      child.stdin?.on('error', () => undefined)
-      child.stdin?.end(init.stdin ?? '')
-    }),
-  writeFile: async (path, text) => {
-    await mkdir(join(path, '..'), { recursive: true })
-    await writeFile(path, text)
-  },
-}
+import { deps } from './deps.ts'
 
 const root = process.argv[2]
 const target = process.argv[3]
