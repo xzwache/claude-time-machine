@@ -153,9 +153,7 @@ const LABELS: Record<FindingKind, string> = {
 
 /** One line for the band: `CI config · deps +left-pad -lodash · install script · .env`. */
 export function alertLine(findings: readonly Finding[]): string {
-  const byKind = new Map<FindingKind, Finding[]>()
-  for (const finding of findings) byKind.set(finding.kind, [...(byKind.get(finding.kind) ?? []), finding])
-  return [...byKind]
+  return [...groupBy(findings, finding => finding.kind)]
     .map(([kind, found]) => {
       const items = found.flatMap(one => one.items)
       const paths = found.flatMap(one => one.paths)
@@ -179,6 +177,16 @@ export function findingLines(findings: readonly Finding[]): string[] {
 /** Every path the findings name, once. */
 export function findingPaths(findings: readonly Finding[]): string[] {
   return [...new Set(findings.flatMap(finding => finding.paths))]
+}
+
+function groupBy<T, K>(items: readonly T[], key: (item: T) => K): Map<K, T[]> {
+  const groups = new Map<K, T[]>()
+  for (const item of items) {
+    const group = groups.get(key(item))
+    if (group) group.push(item)
+    else groups.set(key(item), [item])
+  }
+  return groups
 }
 
 function listed(items: readonly string[]): string {
@@ -217,11 +225,9 @@ async function modesAt(
   plans: readonly PathPlan[],
   pick: (plan: PathPlan) => string,
 ): Promise<Map<string, string>> {
-  const byCommit = new Map<string, string[]>()
-  for (const plan of plans) byCommit.set(pick(plan), [...(byCommit.get(pick(plan)) ?? []), plan.path])
   const modes = new Map<string, string>()
-  for (const [commit, paths] of byCommit) {
-    for (const chunk of chunks(paths)) {
+  for (const [commit, grouped] of groupBy(plans, pick)) {
+    for (const chunk of chunks(grouped.map(plan => plan.path))) {
       const out = await shadow.git(['ls-tree', '-z', '--full-tree', commit, '--', ...chunk], { trim: false })
       for (const line of out.split('\0').filter(Boolean)) {
         const [info = '', path = ''] = line.split('\t')
