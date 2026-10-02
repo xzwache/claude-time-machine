@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-for-dark-theme.png">
+    <img src="docs/logo-for-light-theme.png" width="320" alt="Claude Time Machine">
+  </picture>
+</p>
+
 <h1 align="center">Claude Time Machine</h1>
 
 <p align="center">
