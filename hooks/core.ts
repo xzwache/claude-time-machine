@@ -12,6 +12,8 @@
 // Node for the tests, so it depends only on the two functions it is given.
 
 import type { Change, Entry, EntryKind } from '../types'
+import { branchSnapshot, commitPaths } from './export.ts'
+import type { BranchReport, CommitReport, Repos } from './export.ts'
 import { ATTRIBUTES, GIT_FLAGS, GitError, chunks, diskUsage } from './git.ts'
 import type { Deps, ExecInit, ExecResult } from './git.ts'
 import { firstLine, message, undoTitle } from './message.ts'
@@ -30,6 +32,7 @@ import {
 } from './timeline.ts'
 import type { PathPlan, Raw } from './timeline.ts'
 
+export type { BranchReport, CommitReport } from './export.ts'
 export type { Deps, Exec, ExecInit, ExecResult } from './git.ts'
 export { deleteProject, listProjects } from './projects.ts'
 
@@ -76,6 +79,8 @@ export class TimeMachine {
   private chain: Promise<unknown> = Promise.resolve()
   private isReady = false
   private cache: { tip: string; timeline: Timeline } | undefined
+  /** Each session's pending turn, as last read or written by this process. */
+  private pending = new Map<string, PendingTurn | null>()
   private excludes: string | undefined
 
   /** `window`: how many commits a history read starts with (tests shrink it). */
@@ -117,6 +122,7 @@ export class TimeMachine {
       const pending: PendingTurn = { turnId, prompt, startedAt: Date.now(), base: base.commit, session }
       const blob = await this.git(['hash-object', '-w', '--stdin'], { stdin: JSON.stringify(pending) })
       await this.git(['update-ref', pendingRef(session), blob])
+      this.pending.set(session, pending)
     })
   }
 
@@ -166,7 +172,8 @@ export class TimeMachine {
   beforeCommand(session: string): Promise<void> {
     return this.serial(async () => {
       if (!this.isReady || !(await this.readPending(session))) return
-      await this.recordOutside(session, "Changes outside Claude's tools")
+      // New ignored files are looked for after the command, not before.
+      await this.recordOutside(session, "Changes outside Claude's tools", false)
     })
   }
 
@@ -183,7 +190,8 @@ export class TimeMachine {
   save(name: string, session: string | null): Promise<Entry | undefined> {
     return this.serial(async () => {
       await this.ensureReady()
-      const tree = await this.snapshot()
+      await this.snapshot()
+      const tree = await this.git(['write-tree'])
       const tip = await this.tip()
       const meta: Meta = { kind: 'checkpoint', title: name.trim() || 'Checkpoint' }
       if (session !== null) meta.session = session
@@ -313,6 +321,58 @@ export class TimeMachine {
     })
   }
 
+  /**
+   * Commits what an entry changed (a turn: Claude's steps) to the project's
+   * own repository, on its current branch, each file as the entry left it.
+   */
+  commitTo(ref: string, message: string | undefined, isForced: boolean): Promise<CommitReport> {
+    return this.serial(async () => {
+      await this.ensureReady()
+      const entry = await this.readEntry(ref)
+      if (!entry) throw new Error(`No snapshot named ${ref}`)
+      const sources = (await this.planFor(entry.id)).map(plan => ({ path: plan.path, commit: plan.after }))
+      if (sources.length === 0) throw new Error('That snapshot changed no files')
+      return commitPaths(this.repos(), sources, `${message?.trim() || entry.title}\n`, isForced)
+    })
+  }
+
+  /** Creates a branch in the project's repository holding a whole snapshot. */
+  branchTo(ref: string, name: string): Promise<BranchReport> {
+    return this.serial(async () => {
+      await this.ensureReady()
+      const entry = await this.readEntry(ref)
+      if (!entry) throw new Error(`No snapshot named ${ref}`)
+      const text = `${entry.title}\n\nThe work tree at time machine snapshot ${entry.id.slice(0, 12)}.\n`
+      return branchSnapshot(this.repos(), entry.id, name, text)
+    })
+  }
+
+  /**
+   * What an entry changed as a patch (`git apply` or `patch -p1` from the
+   * project root), binary files included.
+   */
+  patch(ref: string): Promise<string> {
+    return this.serial(async () => {
+      await this.ensureReady()
+      const entry = await this.readEntry(ref)
+      if (!entry) throw new Error(`No snapshot named ${ref}`)
+      const pairs = new Map<string, string[]>()
+      for (const plan of await this.planFor(entry.id)) {
+        const key = `${plan.before} ${plan.after}`
+        pairs.set(key, [...(pairs.get(key) ?? []), plan.path])
+      }
+      let patch = ''
+      for (const [key, paths] of pairs) {
+        const [before = '', after = ''] = key.split(' ')
+        for (const chunk of chunks(paths)) {
+          const args = ['diff', '--binary', '--no-color', '--no-ext-diff', '--no-renames', before, after, '--', ...chunk]
+          patch += await this.git(args, { trim: false })
+        }
+      }
+      return patch
+    })
+  }
+
   /** How many snapshots there are and how much disk they take. */
   stats(): Promise<{ entries: number; bytes: number }> {
     return this.serial(async () => {
@@ -392,7 +452,8 @@ export class TimeMachine {
     await this.git(['config', 'index.version', '4'])
     const has = await this.run(['git', ...GIT_FLAGS, 'rev-parse', '--verify', '-q', TIMELINE], { env: this.env() })
     if (has.exitCode !== 0) {
-      const tree = await this.snapshot()
+      await this.snapshot()
+      const tree = await this.git(['write-tree'])
       const id = await this.git(['commit-tree', tree], { stdin: message({ kind: 'baseline', title: 'Baseline' }) })
       await this.git(['update-ref', TIMELINE, id])
     }
@@ -424,12 +485,17 @@ export class TimeMachine {
       recorded = await this.readEntry(id)
     }
     await this.git(['update-ref', '-d', pendingRef(pending.session)])
+    this.pending.set(pending.session, null)
     return recorded
   }
 
   /** Snapshots the work tree and records any change since the tip. */
-  private async recordOutside(session: string | null, title: string): Promise<{ commit: string; tree: string }> {
-    await this.snapshot()
+  private async recordOutside(
+    session: string | null,
+    title: string,
+    isDiscovering = true,
+  ): Promise<{ commit: string; tree: string }> {
+    await this.snapshot(isDiscovering)
     await this.commitIfChanged(session, 'outside', title)
     return this.tip()
   }
@@ -496,12 +562,16 @@ export class TimeMachine {
     return planCommit(entry.id, entry.parent, entry.changes)
   }
 
-  private async snapshot(): Promise<string> {
+  /**
+   * Brings the shadow index up to the work tree. `isDiscovering` also looks
+   * for new small ignored files: a second walk of the tree, skipped where a
+   * snapshot must be quick and a new ignored file is unlikely.
+   */
+  private async snapshot(isDiscovering = true): Promise<void> {
     await this.syncExcludes()
     await this.git(['add', '-A', '--ignore-errors'], { timeoutMs: SNAPSHOT_TIMEOUT_MS, isLenient: true })
-    await this.addSmallIgnoredFiles()
+    if (isDiscovering) await this.addSmallIgnoredFiles()
     await this.dropExcluded()
-    return this.git(['write-tree'])
   }
 
   /**
@@ -568,8 +638,12 @@ export class TimeMachine {
   }
 
   private async readPending(session: string): Promise<PendingTurn | undefined> {
+    const known = this.pending.get(session)
+    if (known !== undefined) return known ?? undefined
     const ref = await this.run(['git', ...GIT_FLAGS, 'rev-parse', '--verify', '-q', pendingRef(session)], { env: this.env() })
-    return ref.exitCode === 0 ? this.readPendingBlob(ref.stdout.trim()) : undefined
+    const read = ref.exitCode === 0 ? await this.readPendingBlob(ref.stdout.trim()) : undefined
+    this.pending.set(session, read ?? null)
+    return read
   }
 
   private async readPendingBlob(blob: string): Promise<PendingTurn | undefined> {
@@ -595,7 +669,10 @@ export class TimeMachine {
   private async dropStalePending(): Promise<void> {
     for (const { ref, blob } of await this.pendingRefs()) {
       const pending = await this.readPendingBlob(blob)
-      if (!pending || Date.now() - pending.startedAt > STALE_PENDING_MS) await this.git(['update-ref', '-d', ref])
+      if (!pending || Date.now() - pending.startedAt > STALE_PENDING_MS) {
+        await this.git(['update-ref', '-d', ref])
+        this.pending.clear()
+      }
     }
   }
 
@@ -677,6 +754,27 @@ export class TimeMachine {
     if (!normal.startsWith(`${this.root}/`)) return undefined
     const rel = normal.slice(this.root.length + 1)
     return rel === '' || rel === '.git' || rel.startsWith('.git/') ? undefined : rel
+  }
+
+  /** git in the shadow repository and in the project's own, for export.ts. */
+  private repos(): Repos {
+    const literal = (args: string[]) => (args[0] === 'check-ignore' ? '0' : '1')
+    return {
+      shadow: (args, options = {}) =>
+        this.git(args, { ...options, env: { GIT_LITERAL_PATHSPECS: literal(args) } }),
+      user: async (args, options = {}) => {
+        const env: Record<string, string> = { GIT_LITERAL_PATHSPECS: literal(args), LC_ALL: 'C' }
+        if (options.index !== undefined) env.GIT_INDEX_FILE = options.index
+        const init: ExecInit = { cwd: this.root, env }
+        if (options.stdin !== undefined) init.stdin = options.stdin
+        const result = await this.run(['git', ...args], init)
+        if (result.exitCode !== 0 && !options.isLenient) throw new GitError(args, result)
+        return options.trim === false ? result.stdout : result.stdout.trim()
+      },
+      userSucceeds: async args => (await this.run(['git', ...args], { cwd: this.root, env: { LC_ALL: 'C' } })).exitCode === 0,
+      exists: async path => (await this.run(['test', '-e', path], {})).exitCode === 0,
+      remove: async path => void (await this.run(['rm', '-f', '--', path], {})),
+    }
   }
 
   private env(): Record<string, string> {

@@ -98,6 +98,20 @@ describe('managing histories', () => {
   })
 })
 
+describe('taking snapshots out', () => {
+  test('/tm branch and /tm retain explain their arguments', async ($, on) => {
+    fakeHost(on)
+    expect((await $.command.run(typed('branch 1'))).text).toMatch(/Usage: \/tm branch N name/)
+    expect((await $.command.run(typed('retain'))).text).toMatch(/Usage: \/tm retain 30d \| off\. Now: off/)
+  })
+
+  test('/tm commit and /tm patch say so when there is no turn yet', async ($, on) => {
+    fakeHost(on)
+    expect((await $.command.run(typed('commit'))).text).toBe('No Claude turn to commit yet.')
+    expect((await $.command.run(typed('patch'))).text).toBe('No Claude turn to export yet.')
+  })
+})
+
 describe('modes', () => {
   test('/tm off stops snapshots around tool calls, /tm on brings them back', async ($, on) => {
     const calls = fakeHost(on)

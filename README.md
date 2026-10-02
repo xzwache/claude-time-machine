@@ -1,5 +1,7 @@
 # Claude Time Machine
 
+[![CI](https://github.com/xzwache/claude-time-machine/actions/workflows/ci.yml/badge.svg)](https://github.com/xzwache/claude-time-machine/actions/workflows/ci.yml)
+
 **Every Claude turn is a snapshot.** You can see what Claude changed, step by step. You can undo
 a whole turn or a single step, or travel the whole workspace back. The work you had before
 Claude touched it stays.
@@ -39,7 +41,8 @@ Answer:
   forced undo can be undone too.
 - **Your repository is not touched.** It gets no commits, no stash, no branch changes and no
   index changes. History lives in a separate "shadow" Git repository under
-  `~/.claude/time-machine/`.
+  `~/.claude/time-machine/`. The one exception is when you ask for it with `/tm commit` or
+  `/tm branch`.
 - **No model tokens.** Snapshots, diffs and restores are plain local Git, and nothing goes into
   the model's context. The one exception is a `/tm` command's text output, which becomes a
   transcript row like any slash command's output. The pane and the band write no transcript
@@ -100,6 +103,10 @@ timeline.
 | `/tm save [name]` | Saves the work tree now as a named checkpoint, even if nothing changed. |
 | `/tm on`, `/tm off`, `/tm manual` | Sets this project's mode. `on` snapshots every turn (the default), `off` takes no snapshots, and `manual` snapshots only on `/tm save`. The mode is kept across sessions, and the history stays in every mode. |
 | `/tm prune 30d` or `/tm prune 50` | Forgets snapshots older than 30 days, or keeps only the newest 50. The oldest kept state becomes the new baseline. |
+| `/tm commit [N] [message] [--force]` | Commits what turn N changed (default: the latest turn) to your current branch, each file as the turn left it. Your other changes, your work tree and the rest of your index are not touched. Files your repo ignores (such as `.env`) are left out. Refuses during a merge or rebase. Without `--force`, it also refuses if you have staged changes to the same files. |
+| `/tm branch N name` | Creates branch `name` in your repo: a commit on top of `HEAD` with every file as it was at snapshot N. `HEAD`, the index and your files do not change. |
+| `/tm patch [N]` | Writes turn N as a patch file to `~/.claude/time-machine/patches/`, binary files included, and copies it to the clipboard. Apply it with `git apply`. |
+| `/tm retain 30d` or `/tm retain off` | Prunes snapshots older than 30 days, now and then once a day at session start. |
 | `/tm stats` | Shows the snapshot count, disk use and mode for this project. |
 | `/tm projects [rm N --yes]` | Lists every project that has a history, with its size, last activity and whether its folder still exists. `rm N --yes` deletes project N's history. |
 | `/tm git` | Prints the `git` command for browsing the timeline yourself. |
@@ -149,16 +156,31 @@ turn.complete     →  full snapshot (leftovers are "not Claude"), then a turn m
   When two sessions run in the same project, each turn claims only its own session's steps.
 - **Snapshots.** A snapshot is `git add -A` into the shadow repository's own index, followed by
   `git write-tree`. Git rehashes only files whose stat data changed, and the untracked cache and
-  index v4 are on. On a 50,000-file project the first snapshot took 4.3 s and later ones took
-  50–90 ms. A step that changes nothing costs only that snapshot.
+  index v4 are on. A step that changes nothing costs only that snapshot.
 - **Read-only commands are skipped.** A Bash command whose every part is a read-only program
   takes no snapshots. Examples: `ls`, `cat`, `grep`, `rg`, `find` without `-delete` or `-exec`,
   `sed` without `-i`, and `git status`/`log`/`diff`. A command with `>`, `$(…)` or `tee` never
   counts as read-only. If a command is wrongly judged read-only, nothing is lost: the next
   snapshot records its changes, attributed to the next step or to "not Claude".
 - **Disk.** Every snapshot first stores new objects loose. After a turn, `git gc --auto` packs
-  them once there are more than about 1,000. In the same test, packing shrank the shadow
-  repository from 207 MB to 9 MB. `/tm prune` rewrites history and runs a full gc.
+  them in the background once there are more than about 1,000. `/tm prune` rewrites history and
+  runs a full gc.
+- **Measured cost.** `node scripts/bench.ts <project> <file>` reproduces these numbers. On a
+  shallow clone of [microsoft/TypeScript](https://github.com/microsoft/TypeScript) (66,945
+  files, 421 MB, Linux, SSD):
+
+  | Operation | Time |
+  | --- | --- |
+  | First snapshot (once per project) | 9.7 s |
+  | Packing that snapshot (background) | 12.7 s, 284 MB → 44 MB |
+  | Turn start | 0.29 s |
+  | Bash call that is not read-only (before + after) | 0.16 s + 0.34 s |
+  | Edit or Write (before + after) | 0.29 s |
+  | Turn end | 0.41 s |
+  | Undo a turn | 0.72 s |
+
+  A turn with three edits and two writing Bash calls therefore costs about 2.5 s on a project
+  this size. Projects of a few thousand files cost a small fraction of that.
 - **Restores.** They use `git checkout <commit> -- <paths>` and `git rm`. These restore content,
   the executable bit and symlinks exactly. They refuse to write through symlinked directories,
   and they remove directories they leave empty. The shadow repository's `info/attributes` turns
@@ -179,6 +201,7 @@ turn.complete     →  full snapshot (leftovers are "not Claude"), then a turn m
   | `message.ts` | The commit message format |
   | `git.ts` | Pinned git settings |
   | `projects.ts` | `/tm projects` |
+  | `export.ts` | `/tm commit` and `/tm branch`: the only writes to your repository |
   | `bash.ts` | The read-only command check |
   | `commands.ts` | `/tm` |
   | `view.tsx` | The band and the pane |
@@ -194,8 +217,12 @@ turn.complete     →  full snapshot (leftovers are "not Claude"), then a turn m
   window, edits are attributed correctly.
 - **Files written by MCP tools or background processes** show up as "not Claude", because no
   tool call is linked to them. Undoing the turn leaves them, but you can undo them individually.
-- **Large repositories** pay two full snapshots per Bash call that is not read-only. Expect
-  around 0.1 s each at 50,000 files, and more without an SSD. If the snapshot before a turn takes more than 2 s, a
+- **Large repositories** pay two full snapshots per Bash call that is not read-only. See the
+  table above for what that costs at 67,000 files. If that is too slow, `/tm manual` or
+  `.tmignore` help.
+- **New ignored files created by Bash** are found after the command, not before. One that
+  appears between two commands, from something other than Claude, is attributed to the next
+  command. If the snapshot before a turn takes more than 2 s, a
   toast says so.
 - **Empty directories** are not tracked, because Git does not track them.
 - **Files outside the project root** are not tracked.
@@ -230,7 +257,8 @@ delete all of it, run `rm -rf ~/.claude/time-machine`.
 npm test            # tests/*.spec.ts: real git in temp dirs, the read-only check (Node 22.18+)
 npm run test:mod    # tests/plugin.test.tsx: the mod inside Claude Code's test engine
 npm run validate    # claude plugin validate .
-npm run typecheck   # tsc; needs .claude-plugin/types, which Claude Code lays on first load
+npm run typecheck   # tsc; needs .claude-plugin/types, which validate and test lay
+npm run bench -- <project> <file>   # snapshot costs on a real project
 ```
 
 Try it on a demo project:

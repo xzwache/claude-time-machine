@@ -506,3 +506,111 @@ describe('checkpoints and .tmignore', () => {
   })
 })
 
+
+describe('taking snapshots into the project repository', () => {
+  test("/tm commit commits Claude's files of a turn, as the turn left them", async () => {
+    await put('src/auth.ts', 'A\nmine, uncommitted\n')
+    const entry = await turn('add token', async () => {
+      await put('src/token.ts', 'token\n')
+      await put('src/user.ts', 'user v2\n')
+      await unlink(file('src/legacy.ts'))
+    })
+    assert.ok(entry)
+    const before = await sh('git', 'rev-parse', 'HEAD')
+    const report = await tm.commitTo(entry.id, undefined, false)
+    assert.equal(await sh('git', 'rev-parse', 'HEAD^'), before)
+    assert.equal((await sh('git', 'log', '-1', '--format=%s')).trim(), 'add token')
+    assert.deepEqual(
+      (await sh('git', 'show', '--name-status', '--format=', 'HEAD')).trim().split('\n').sort(),
+      ['A\tsrc/token.ts', 'D\tsrc/legacy.ts', 'M\tsrc/user.ts'],
+    )
+    assert.deepEqual(report.committed.sort(), ['src/legacy.ts', 'src/token.ts', 'src/user.ts'])
+    // Only the person's own edit is left over, unstaged; the work tree is untouched.
+    assert.equal(await sh('git', 'status', '--porcelain'), ' M src/auth.ts\n')
+    assert.equal(await read('src/auth.ts'), 'A\nmine, uncommitted\n')
+  })
+
+  test('/tm commit skips files the project ignores', async () => {
+    const entry = await turn('env and code', async () => {
+      await put('.env', 'SECRET=1\n')
+      await put('src/user.ts', 'v2\n')
+    })
+    assert.ok(entry)
+    const report = await tm.commitTo(entry.id, 'code only', false)
+    assert.deepEqual(report.skipped, ['.env'])
+    assert.equal((await sh('git', 'show', '--name-only', '--format=', 'HEAD')).trim(), 'src/user.ts')
+  })
+
+  test('/tm commit refuses to replace staged changes unless forced', async () => {
+    const entry = await turn('edit', () => put('src/user.ts', 'claude\n'))
+    assert.ok(entry)
+    await put('src/user.ts', 'staged by me\n')
+    await sh('git', 'add', 'src/user.ts')
+    await assert.rejects(tm.commitTo(entry.id, undefined, false), /Staged changes to src\/user.ts/)
+    await tm.commitTo(entry.id, undefined, true)
+    assert.equal(await sh('git', 'show', 'HEAD:src/user.ts'), 'claude\n')
+  })
+
+  test('/tm branch makes a branch of the whole snapshot and leaves HEAD alone', async () => {
+    await put('src/auth.ts', 'A\nmine\n')
+    const entry = await turn('feature', () => put('src/new.ts', 'new\n'))
+    assert.ok(entry)
+    const head = await sh('git', 'rev-parse', 'HEAD')
+    const status = await sh('git', 'status', '--porcelain')
+    const report = await tm.branchTo(entry.id, 'tm/feature')
+    assert.equal(report.branch, 'tm/feature')
+    assert.equal(await sh('git', 'rev-parse', 'HEAD'), head)
+    assert.equal(await sh('git', 'status', '--porcelain'), status)
+    assert.equal(await sh('git', 'show', 'tm/feature:src/auth.ts'), 'A\nmine\n')
+    assert.equal(await sh('git', 'show', 'tm/feature:src/new.ts'), 'new\n')
+    assert.equal(await sh('git', 'rev-parse', 'tm/feature^'), head)
+    await assert.rejects(tm.branchTo(entry.id, 'tm/feature'), /already exists/)
+    await assert.rejects(tm.branchTo(entry.id, 'bad..name'), /Not a valid branch name/)
+  })
+
+  test('/tm branch keeps tracked files the time machine never sees (.tmignore)', async () => {
+    await put('data/big.csv', 'tracked data\n')
+    await sh('git', 'add', 'data/big.csv')
+    await sh('git', 'commit', '-qm', 'data')
+    await put('.tmignore', 'data/\n')
+    const entry = await turn('code', () => put('src/user.ts', 'v2\n'))
+    assert.ok(entry)
+    await tm.branchTo(entry.id, 'tm/code')
+    assert.equal(await sh('git', 'show', 'tm/code:data/big.csv'), 'tracked data\n')
+  })
+
+  test('/tm patch applies to the project as it was before the turn', async () => {
+    const entry = await turn('patchable', async () => {
+      await put('src/user.ts', 'patched\n')
+      await put('assets/blob.bin', new Uint8Array([0, 1, 2, 255]))
+      await unlink(file('src/legacy.ts'))
+    })
+    assert.ok(entry)
+    const patch = await tm.patch(entry.id)
+    await tm.undo(entry.id)
+    await writeFile(join(store, 'turn.patch'), patch)
+    await sh('git', 'apply', join(store, 'turn.patch'))
+    assert.equal(await read('src/user.ts'), 'patched\n')
+    assert.deepEqual(new Uint8Array(await readFile(file('assets/blob.bin'))), new Uint8Array([0, 1, 2, 255]))
+    assert.equal(await exists('src/legacy.ts'), false)
+  })
+
+  test('/tm commit and /tm branch work when the project is a subfolder of the repository', async () => {
+    await put('pkg/app.ts', 'v1\n')
+    await sh('git', 'add', '-A')
+    await sh('git', 'commit', '-qm', 'pkg')
+    tm = new TimeMachine(deps, join(root, 'pkg'), join(store, 'pkg.git'))
+    await tm.init()
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'edit pkg', SESSION)
+    await write('pkg/app.ts', 'v2\n')
+    const entry = await tm.finishTurn(id, SESSION, false)
+    assert.ok(entry)
+    assert.deepEqual(entry.changes, [{ status: 'modified', path: 'app.ts' }])
+    await tm.branchTo(entry.id, 'tm/pkg')
+    assert.equal(await sh('git', 'show', 'tm/pkg:pkg/app.ts'), 'v2\n')
+    assert.equal(await sh('git', 'show', 'tm/pkg:src/user.ts'), 'user\n')
+    await tm.commitTo(entry.id, undefined, false)
+    assert.equal((await sh('git', 'show', '--name-only', '--format=', 'HEAD')).trim(), 'pkg/app.ts')
+  })
+})

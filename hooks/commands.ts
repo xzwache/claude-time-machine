@@ -17,6 +17,10 @@ export type Host = {
   exec: Exec
   forget: (root: string) => void
   report: (error: unknown) => string
+  writeFile: (path: string, text: string) => Promise<void>
+  copy: (text: string) => Promise<boolean>
+  retention: () => Promise<number | null>
+  setRetention: (days: number | null) => Promise<void>
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -31,6 +35,10 @@ export const HELP = [
   '  travel N|name             put every file back to snapshot N or a saved checkpoint',
   '  save [name]               save the work tree now as a named checkpoint',
   '  on | off | manual         snapshot every turn, never, or only on /tm save',
+  '  commit [N] [message] [--force]  commit what turn N changed to your current branch',
+  '  branch N name             a new branch in your repo holding snapshot N',
+  '  patch [N]                 turn N as a patch file (also copied to the clipboard)',
+  '  retain 30d | off          prune snapshots older than that, once a day',
   '  prune 30d | prune 50      forget old snapshots (by age, or keep the newest N)',
   '  stats                     snapshots, disk use and mode for this project',
   '  projects [rm N --yes]     every project with a history; delete one',
@@ -105,6 +113,35 @@ export async function runCommand(host: Host, args: string): Promise<string> {
       }
       case 'prune':
         return await pruneCommand(host, tm, arg)
+      case 'retain':
+        return await retainCommand(host, tm, arg)
+      case 'commit': {
+        const words = rest.filter(word => !word.startsWith('--'))
+        const hasRef = words[0] !== undefined && isRef(words[0])
+        const entry = hasRef ? await resolveRef(tm, list, words[0]) : list.find(one => one.kind === 'turn')
+        if (!entry) return 'No Claude turn to commit yet.'
+        const message = (hasRef ? words.slice(1) : words).join(' ').replace(/^["']|["']$/g, '')
+        const done = await tm.commitTo(entry.id, message || undefined, flags.has('--force'))
+        const skipped = done.skipped.length > 0 ? `\nLeft out (ignored by your repo): ${done.skipped.join(', ')}` : ''
+        return `Committed ${plural(done.committed.length, 'file')} to ${done.branch} as ${done.commit.slice(0, 7)}.${skipped}`
+      }
+      case 'branch': {
+        const [ref, name] = rest.filter(word => !word.startsWith('--'))
+        if (ref === undefined || name === undefined) return 'Usage: /tm branch N name (see /tm log).'
+        const done = await tm.branchTo((await resolveRef(tm, list, ref)).id, name)
+        const skipped = done.skipped.length > 0 ? `\nLeft out (ignored by your repo): ${done.skipped.join(', ')}` : ''
+        return `Created branch ${done.branch} at ${done.commit.slice(0, 7)} (${plural(done.files, 'file')}). HEAD and your files did not change.${skipped}`
+      }
+      case 'patch': {
+        const entry = arg ? await resolveRef(tm, list, arg) : list.find(one => one.kind === 'turn')
+        if (!entry) return 'No Claude turn to export yet.'
+        const patch = await tm.patch(entry.id)
+        if (patch === '') return 'That snapshot changed no files.'
+        const path = `${await host.home()}/patches/${entry.id.slice(0, 12)}.patch`
+        await host.writeFile(path, patch)
+        const copied = (await host.copy(patch)) ? ' and copied to the clipboard' : ''
+        return `Wrote ${path}${copied}.\nApply it from the project root with: git apply ${path}`
+      }
       case 'projects':
         return await projectsCommand(host, tm, rest, flags)
       default:
@@ -125,9 +162,34 @@ async function showText(tm: TimeMachine, entry: Entry, number: string): Promise<
   ].join('\n')
 }
 
-async function pruneCommand(host: Host, tm: TimeMachine, arg: string | undefined): Promise<string> {
+async function retainCommand(host: Host, tm: TimeMachine, arg: string | undefined): Promise<string> {
+  if (arg === 'off') {
+    await host.setRetention(null)
+    return 'Automatic pruning off: snapshots are kept until /tm prune.'
+  }
+  const days = daysOf(arg)
+  if (days === undefined) {
+    const now = await host.retention()
+    return `Usage: /tm retain 30d | off. Now: ${now === null ? 'off' : `${now} days`}.`
+  }
+  await host.setRetention(days)
+  const done = await tm.prune({ olderThanMs: days * DAY_MS })
+  await host.refresh(tm)
+  return `Snapshots older than ${plural(days, 'day')} are pruned once a day. Pruned ${plural(done.removed, 'snapshot')} now.`
+}
+
+function daysOf(arg: string | undefined): number | undefined {
   const days = arg === undefined ? null : /^(\d+)d$/.exec(arg)
-  const options = days ? { olderThanMs: Number(days[1]) * DAY_MS } : arg !== undefined && /^\d+$/.test(arg) ? { keepLast: Number(arg) } : undefined
+  return days ? Number(days[1]) : undefined
+}
+
+function isRef(word: string): boolean {
+  return /^\d{1,3}(\.\d{1,3})?$/.test(word) || /^[0-9a-f]{7,64}$/.test(word)
+}
+
+async function pruneCommand(host: Host, tm: TimeMachine, arg: string | undefined): Promise<string> {
+  const days = daysOf(arg)
+  const options = days !== undefined ? { olderThanMs: days * DAY_MS } : arg !== undefined && /^\d+$/.test(arg) ? { keepLast: Number(arg) } : undefined
   if (!options) return 'Usage: /tm prune 30d (older than 30 days) or /tm prune 50 (keep the newest 50).'
   const done = await tm.prune(options)
   await host.refresh(tm)

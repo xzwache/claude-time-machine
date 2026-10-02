@@ -1,6 +1,6 @@
 {
   "name": "claude-time-machine",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "A Claude Code mod: every Claude turn becomes a snapshot you can review, undo or travel back to.",
   "license": "MIT",
@@ -12,6 +12,7 @@
     "test": "node --test tests/*.spec.ts",
     "test:mod": "claude plugin test .",
     "validate": "claude plugin validate .",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "bench": "node scripts/bench.ts"
   }
 }

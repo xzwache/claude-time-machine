@@ -18,6 +18,7 @@ const COMMAND = 'tm'
 const PANE = 'time-machine'
 const HISTORY = 40
 const SLOW_SNAPSHOT_MS = 2000
+const DAY_MS = 24 * 60 * 60 * 1000
 
 const entries = atom({ plugin: 'time-machine', key: 'entries' } as const, [] as Entry[])
 const selected = atom({ plugin: 'time-machine', key: 'selected' } as const, null as string | null)
@@ -41,6 +42,7 @@ export const register: Register = on => {
       const tm = await machine($)
       void tm
         .init()
+        .then(() => pruneByRetention($, tm))
         .then(() => refresh($, tm))
         .then(() => tm.maintain())
         .catch(error => report($, error))
@@ -162,6 +164,28 @@ function hostOf($: EngineInterface): Host {
     exec: depsOf($).exec,
     forget: root => void machines.delete(root),
     report: error => report($, error),
+    writeFile: (path, text) => $.fs.write(path, text),
+    copy: async text => (await $.ui.copy({ text })).isCopied,
+    retention: async () => {
+      const days = await $.store.get(`retain:${await digest(await $.session.root())}`)
+      return typeof days === 'number' ? days : null
+    },
+    setRetention: async days => $.store.set(`retain:${await digest(await $.session.root())}`, days),
+  }
+}
+
+/** Prunes by the project's retention, at most once a day. */
+async function pruneByRetention($: EngineInterface, tm: TimeMachine): Promise<void> {
+  const key = await digest(await $.session.root())
+  const days = await $.store.get(`retain:${key}`)
+  const last = await $.store.get(`pruned:${key}`)
+  if (typeof days !== 'number' || (typeof last === 'number' && Date.now() - last < DAY_MS)) return
+  try {
+    await tm.prune({ olderThanMs: days * DAY_MS })
+    await $.store.set(`pruned:${key}`, Date.now())
+  } catch (error) {
+    // Another session's turn is running: try again next session.
+    report($, error)
   }
 }
 

@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The mod API is early access: pin the Claude Code build it is developed against.
+      - run: npm install -g @anthropic-ai/claude-code@2.1.287 typescript@6.0.2
+      - name: Core tests (real git)
+        run: npm test
+      - name: Validate the plugin and the marketplace
+        run: claude plugin validate . --strict
+      - name: Mod tests in Claude Code's test engine
+        run: claude plugin test .
+      # plugin validate/test lay .claude-plugin/types, which the typecheck reads.
+      - name: Typecheck
+        run: tsc -p .
