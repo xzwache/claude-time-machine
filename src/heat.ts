@@ -432,9 +432,8 @@ export function describe(node: HeatNode): string {
 
 /** The hottest files under `metric`, as `/tm heat` prints them. */
 export function topFiles(files: FileHeat[], metric: HeatMetric, limit: number): FileHeat[] {
-  // Claude's share alone would rank every one-line file Claude wrote first.
-  const score = (file: FileHeat) =>
-    metric === 'owner' ? topScore(file, metric) * Math.log1p(file.claude) : topScore(file, metric)
+  // By share, then by lines: among files all Claude's, the big ones first.
+  const score = (file: FileHeat) => topScore(file, metric)
   return files
     .filter(file => score(file) > 0)
     .sort((a, b) => score(b) - score(a) || b.claude - a.claude || a.path.localeCompare(b.path))
