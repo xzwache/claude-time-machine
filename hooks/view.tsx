@@ -90,7 +90,7 @@ export function paneView(table: Table, data: PaneData, on: PaneHandlers): Render
             {shown.changes.slice(0, 30).map((change, i) =>
               row(`f-${i}`, change.path === shown.file, `${statusMark(change)} ${change.path}`, () => on.showFile(change.path)),
             )}
-            {shown.changes.length > 30 && <Text dimColor>…and {shown.changes.length - 30} more</Text>}
+            {shown.changes.length + shown.more > 30 && <Text dimColor>…and {shown.changes.length + shown.more - 30} more</Text>}
           </Box>
           {focus.parent !== null && (
             <Box flexDirection="row" gap={1} marginTop={1}>

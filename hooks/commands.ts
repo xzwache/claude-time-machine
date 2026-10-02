@@ -15,6 +15,7 @@ export type Host = {
   openPane: () => Promise<boolean>
   home: () => Promise<string>
   exec: Exec
+  hasHistory: () => Promise<boolean>
   forget: (root: string) => void
   report: (error: unknown) => string
   writeFile: (path: string, text: string) => Promise<void>
@@ -51,6 +52,28 @@ export async function runCommand(host: Host, args: string): Promise<string> {
   const flags = new Set(rest.filter(word => word.startsWith('--')))
   const arg = rest.find(word => !word.startsWith('--'))
   try {
+    // These work with no history, and never start one.
+    switch (verb) {
+      case 'on':
+      case 'auto':
+        await host.setMode('auto')
+        await host.refresh(await host.machine())
+        return 'Time machine on: every turn is snapshotted.'
+      case 'off':
+        await host.setMode('off')
+        return 'Time machine off for this project: no snapshots until /tm on. The history stays.'
+      case 'manual':
+        await host.setMode('manual')
+        await host.refresh(await host.machine())
+        return 'Time machine manual: snapshots only on /tm save.'
+      case 'projects':
+        return await projectsCommand(host, await host.machine(), rest, flags)
+      case 'help':
+        return HELP
+    }
+    if ((await host.mode()) === 'off' && !(await host.hasHistory())) {
+      return 'The time machine is off here: it starts on its own only in git projects. /tm on starts it for this folder.'
+    }
     const tm = await host.machine()
     const list = await host.refresh(tm)
     switch (verb) {
@@ -92,19 +115,6 @@ export async function runCommand(host: Host, args: string): Promise<string> {
         await host.refresh(tm)
         return `Saved checkpoint "${saved?.title ?? name}" (${saved?.id.slice(0, 7) ?? ''}). /tm travel "${saved?.title ?? name}" comes back to it.`
       }
-      case 'on':
-      case 'auto':
-        await host.setMode('auto')
-        await host.refresh(tm)
-        return 'Time machine on: every turn is snapshotted.'
-      case 'off':
-        await host.setMode('off')
-        await host.refresh(tm)
-        return 'Time machine off for this project: no snapshots until /tm on. The history stays.'
-      case 'manual':
-        await host.setMode('manual')
-        await host.refresh(tm)
-        return 'Time machine manual: snapshots only on /tm save.'
       case 'git':
         return `Inspect the timeline with plain git:\n  ${tm.inspectCommand()}\n  (git show <id>, git diff <a> <b> work with the same --git-dir.)`
       case 'stats': {
@@ -142,8 +152,6 @@ export async function runCommand(host: Host, args: string): Promise<string> {
         const copied = (await host.copy(patch)) ? ' and copied to the clipboard' : ''
         return `Wrote ${path}${copied}.\nApply it from the project root with: git apply ${path}`
       }
-      case 'projects':
-        return await projectsCommand(host, tm, rest, flags)
       default:
         return HELP
     }

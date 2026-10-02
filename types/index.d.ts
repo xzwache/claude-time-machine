@@ -58,7 +58,9 @@ export type Project = {
 export type Details = {
   id: string
   steps: Entry[]
+  /** The first files, and how many more there are. */
   changes: Change[]
+  more: number
   file: string | null
   diff: string
 }
