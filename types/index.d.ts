@@ -72,6 +72,42 @@ export type Band = {
   result: string | null
 }
 
+/** What the heat map colors by: Claude's lines, files Claude came back to in later turns, undos, or who wrote it. */
+export type HeatMetric = 'churn' | 'rework' | 'undo' | 'owner'
+
+/** A file or folder of the heat map, with the sums of everything under it. */
+export type HeatNode = {
+  name: string
+  path: string
+  isDir: boolean
+  /** Lines added plus deleted by Claude's steps. */
+  claude: number
+  /** Lines added plus deleted by anything else. */
+  human: number
+  /** Claude's steps that changed it. */
+  edits: number
+  /** Later turns that came back to a file Claude had already changed. */
+  rework: number
+  undos: number
+  files: number
+  children?: HeatNode[]
+}
+
+/** What the heat pane shows: one folder's children, and how to color them. */
+export type HeatView = {
+  metric: HeatMetric
+  /** The folder shown, '' for the project root. */
+  path: string
+  /** Its children, the biggest first, without their own children. */
+  nodes: HeatNode[]
+  total: HeatNode
+  turns: number
+  since: number
+  /** The interactive page, once written. */
+  page: string | null
+  notice: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'time-machine': {
@@ -81,6 +117,7 @@ declare module 'claude-code' {
       confirm: string | null
       notice: string
       band: Band | null
+      heat: HeatView | null
     }
   }
 }

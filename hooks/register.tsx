@@ -6,16 +6,19 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import { isReadOnlyCommand } from '../src/bash.ts'
-import { runCommand } from '../src/commands.ts'
+import { runCommand, writeHeatPage } from '../src/commands.ts'
 import type { Host } from '../src/commands.ts'
 import { TimeMachine } from '../src/index.ts'
 import type { Deps } from '../src/index.ts'
 import { countsText, plural, summaryLine } from '../src/format.ts'
-import { bandView, paneView } from '../src/view.tsx'
-import type { Band, Details, Entry, Mode } from '../types'
+import { heatTree, parentOf, collapse, viewOf } from '../src/heat.ts'
+import type { Heat } from '../src/heat.ts'
+import { bandView, heatView, paneView } from '../src/view.tsx'
+import type { Band, Details, Entry, HeatMetric, HeatNode, HeatView, Mode } from '../types'
 
 const COMMAND = 'tm'
 const PANE = 'time-machine'
+const HEAT_PANE = 'time-machine-heat'
 const HISTORY = 40
 const SLOW_SNAPSHOT_MS = 2000
 const SHOWN_FILES = 100
@@ -27,9 +30,12 @@ const details = atom({ plugin: 'time-machine', key: 'details' } as const, null a
 const confirm = atom({ plugin: 'time-machine', key: 'confirm' } as const, null as string | null)
 const notice = atom({ plugin: 'time-machine', key: 'notice' } as const, '')
 const band = atom({ plugin: 'time-machine', key: 'band' } as const, null as Band | null)
+const heat = atom({ plugin: 'time-machine', key: 'heat' } as const, null as HeatView | null)
 
 const machines = new Map<string, TimeMachine>()
 const gitProjects = new Map<string, boolean>()
+// The whole heat tree stays here, out of the state; the pane holds one folder.
+const heatTrees = new Map<string, { tree: HeatNode; heat: Heat }>()
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -127,6 +133,21 @@ export const register: Register = on => {
     })
   })
 
+  on('ui.render', { component: 'Pane', requestId: HEAT_PANE }, async ($, e) => {
+    const view = await read($, heat)
+    const { Text } = $.ui.resolve(e)
+    if (view === null) return <Text dimColor>Run /tm heat to draw the map.</Text>
+    const columns = Math.max(30, e.props.bodyColumns)
+    const known = heatTrees.get(await $.session.root())
+    const isTop = known === undefined || collapse(known.tree).path === view.path
+    return heatView($.ui.resolve(e), e.surface, view, columns, e.viewport?.rows ?? 40, {
+      metric: metric => void update($, heat, now => now && { ...now, metric }),
+      enter: node => void enterHeat($, node),
+      up: isTop ? null : () => void heatUp($),
+      openPage: () => void openHeatPage($),
+    })
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const data = {
       list: await read($, entries),
@@ -174,6 +195,78 @@ function hostOf($: EngineInterface): Host {
       return typeof days === 'number' ? days : null
     },
     setRetention: async days => $.store.set(`retain:${await digest(await $.session.root())}`, days),
+    showHeat: (tree, read, metric, page) => showHeat($, tree, read, metric, page),
+    openFile: path => openFile($, path),
+  }
+}
+
+async function showHeat(
+  $: EngineInterface,
+  tree: HeatNode,
+  read: Heat,
+  metric: HeatMetric,
+  page: string | null,
+): Promise<boolean> {
+  heatTrees.set(await $.session.root(), { tree, heat: read })
+  await update($, heat, () => viewOf(tree, '', metric, read, page))
+  return (await $.ui.open({ id: HEAT_PANE, title: 'Heat', focus: true })).isPlaced
+}
+
+/** The heat tree of this project: kept from the last /tm heat, or read again after a reload. */
+async function heatTreeOf($: EngineInterface): Promise<{ tree: HeatNode; heat: Heat }> {
+  const root = await $.session.root()
+  const known = heatTrees.get(root)
+  if (known) return known
+  const read = await (await machine($)).heat(null)
+  const made = { tree: heatTree(read.files), heat: read }
+  heatTrees.set(root, made)
+  return made
+}
+
+async function enterHeat($: EngineInterface, node: HeatNode): Promise<void> {
+  const now = await read($, heat)
+  if (!now) return
+  if (!node.isDir) {
+    await update(
+      $,
+      heat,
+      shown => shown && { ...shown, notice: `${node.path}: open it, or /tm log to find the turns that changed it.` },
+    )
+    return
+  }
+  const { tree, heat: known } = await heatTreeOf($)
+  await update($, heat, () => viewOf(tree, node.path, now.metric, known, now.page))
+}
+
+async function heatUp($: EngineInterface): Promise<void> {
+  const now = await read($, heat)
+  if (!now) return
+  const { tree, heat: known } = await heatTreeOf($)
+  await update($, heat, () => viewOf(tree, parentOf(tree, now.path), now.metric, known, now.page))
+}
+
+async function openHeatPage($: EngineInterface): Promise<void> {
+  try {
+    const tm = await machine($)
+    const { tree, heat: known } = await heatTreeOf($)
+    const page = await writeHeatPage(hostOf($), tm, tree, known)
+    const opened = await openFile($, page)
+    const notice = opened ? 'Opened in your browser.' : `Wrote ${page}; open it in a browser.`
+    await update($, heat, now => now && { ...now, page, notice })
+  } catch (error) {
+    const notice = report($, error)
+    await update($, heat, now => now && { ...now, notice })
+  }
+}
+
+/** `open` on macOS, `xdg-open` elsewhere; false when neither worked. */
+async function openFile($: EngineInterface, path: string): Promise<boolean> {
+  const system = (await $.process.run(['uname', '-s'], {})).stdout.trim()
+  const opener = system === 'Darwin' ? 'open' : 'xdg-open'
+  try {
+    return (await $.process.run([opener, path], { timeoutMs: 10_000 })).exitCode === 0
+  } catch {
+    return false
   }
 }
 

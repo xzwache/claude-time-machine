@@ -5,7 +5,19 @@
 import type { EngineInterface, RenderElement } from 'claude-code'
 
 import { clip, countsShort, entryLine, hunksOf, kindLabel, oneLine, statusMark, stepLabel } from './format.ts'
-import type { Band, Details, Entry } from '../types'
+import {
+  METRICS,
+  METRIC_LABELS,
+  describe,
+  heatColor,
+  hex,
+  intensity,
+  maxValue,
+  rasterCells,
+  svgTreemap,
+  valueLabel,
+} from './heat.ts'
+import type { Band, Details, Entry, HeatMetric, HeatNode, HeatView } from '../types'
 
 type Table = ReturnType<EngineInterface['ui']['resolve']>
 
@@ -132,4 +144,104 @@ function diffView(table: Table, diff: string, path: string): RenderElement {
   if (hunks === '') return <Text dimColor>Diff too large to show here: see /tm git.</Text>
 
   return <Code source={hunks} format="diff" path={path} />
+}
+
+export type HeatHandlers = {
+  metric: (metric: HeatMetric) => void
+  enter: (node: HeatNode) => void
+  up: (() => void) | null
+  openPage: () => void
+}
+
+const MAP_ROWS = 18
+const LISTED = 12
+
+export function heatView(
+  table: Table,
+  surface: string,
+  view: HeatView,
+  columns: number,
+  rows: number,
+  on: HeatHandlers,
+): RenderElement {
+  const { Box, Text, Button, Markdown } = table
+  const { nodes, metric, total } = view
+  const mapRows = Math.max(6, Math.min(MAP_ROWS, rows - LISTED - 10))
+  const max = maxValue(nodes, metric)
+  const where = view.path === '' ? 'project' : `${view.path}/`
+  const legend =
+    metric === 'owner' ? 'blue: you · grey: both · orange: Claude' : `${METRIC_LABELS[metric]}: dark none → yellow most`
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>{clip(`${where}  ·  ${describe(total)}`, columns)}</Text>
+      <Text dimColor>
+        {clip(
+          `${view.turns} Claude turns since ${new Date(view.since).toISOString().slice(0, 10)} · size: lines changed`,
+          columns,
+        )}
+      </Text>
+      <Box flexDirection="row" gap={1} marginTop={1}>
+        {METRICS.map((one, i) => (
+          <Button
+            key={`m-${one}`}
+            hotkey={String(i + 1)}
+            variant={one === metric ? 'primary' : undefined}
+            label={METRIC_LABELS[one]}
+            onPress={() => on.metric(one)}
+          />
+        ))}
+        {on.up && <Button key="up" hotkey="b" label="↑ Up" onPress={on.up} />}
+        <Button key="open" hotkey="o" label="Open in browser" onPress={on.openPage} />
+      </Box>
+      <Box marginTop={1}>{mapView(table, surface, nodes, metric, columns, mapRows)}</Box>
+      <Text dimColor>{clip(legend, columns)}</Text>
+      <Box flexDirection="column" marginTop={1}>
+        {nodes.slice(0, LISTED).map((node, i) => {
+          const shown = valueLabel(node, metric)
+          const label = `${node.isDir ? '▸' : ' '} ${node.name}${node.isDir ? '/' : ''}`
+          return (
+            <Box key={`n-${i}`} flexDirection="row" gap={1}>
+              <Text color={hex(heatColor(intensity(node, metric, max), metric))}>██</Text>
+              <Button
+                plain
+                label={clip(`${label}  ${shown}  · ${describe(node)}`, Math.max(10, columns - 4))}
+                onPress={() => on.enter(node)}
+              />
+            </Box>
+          )
+        })}
+        {nodes.length > LISTED && <Text dimColor>…and {nodes.length - LISTED} more</Text>}
+      </Box>
+      {view.notice !== '' && <Text color="yellow">{clip(view.notice, columns * 2)}</Text>}
+      {view.page !== null && <Markdown text={`[Open the interactive map](${fileUrl(view.page)})`} />}
+    </Box>
+  )
+}
+
+function mapView(
+  table: Table,
+  surface: string,
+  nodes: HeatNode[],
+  metric: HeatMetric,
+  columns: number,
+  rows: number,
+): RenderElement {
+  const elements = table as Record<string, unknown>
+  const alt = `Treemap of ${nodes.length} entries by ${METRIC_LABELS[metric]}`
+  if (surface === 'terminal' && 'Raster' in elements) {
+    const { Raster } = table as Extract<Table, { Raster: unknown }>
+    const width = Math.min(512, Math.max(10, columns))
+    return <Raster key="heat-map" columns={width} rows={rows} cells={rasterCells(nodes, metric, width, rows)} />
+  }
+  if ('Svg' in elements) {
+    const { Svg } = table as Extract<Table, { Svg: unknown }>
+    return <Svg source={svgTreemap(nodes, metric, 720, 360)} alt={alt} isInteractive />
+  }
+  const { Text } = table
+  return <Text dimColor>{alt}</Text>
+}
+
+function fileUrl(path: string): string {
+  return `file://${path.split('/').map(encodeURIComponent).join('/')}`
 }

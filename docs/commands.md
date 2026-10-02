@@ -16,6 +16,25 @@ the name of a saved checkpoint (`"before refactor"`).
 In the pane, **Undo this** reverts the selected turn or step. **Travel to before** and **Travel to after** move the
 whole project and ask for a second press.
 
+## Heat map
+
+| Command                                | What it does                                                                                                                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/tm heat [30d] [rework\|undo\|owner]` | Lists the hottest files and opens the Heat pane: a treemap of the project, one folder at a time. Click a folder to go in, `b` to go up, `1`-`4` to change the color.       |
+| `/tm heat open [30d]`                  | Writes the map as one self-contained HTML page to `~/.claude/time-machine/heat/` and opens it in your browser: zoom into folders, hover for numbers, filter the file list. |
+
+Size is every line changed in a file, by anyone. The color is one of:
+
+| Color    | What it counts                                                                                      |
+| -------- | --------------------------------------------------------------------------------------------------- |
+| `churn`  | Lines added plus deleted by Claude's steps.                                                         |
+| `rework` | Later turns that changed a file Claude had already changed: the places Claude keeps coming back to. |
+| `undo`   | Undos that put the file back.                                                                       |
+| `owner`  | Claude's share of the lines changed, from blue (you) to orange (Claude).                            |
+
+These are counts of what happened, not a verdict on the code: a file can be hot because it is where the work is. The
+window is the history you kept; `30d` narrows it. The page uses no network and no model calls.
+
 ## Going back
 
 | Command                       | What it does                                                                                                                                                                      |

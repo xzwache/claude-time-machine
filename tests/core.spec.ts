@@ -8,6 +8,8 @@ import { join } from 'node:path'
 import { after, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 
+import { heatText, heatTree, nodeAt, parentOf, rasterCells, squarify, viewOf } from '../src/heat.ts'
+import { heatPage } from '../src/heat-page.ts'
 import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
 import type { Deps, ExecResult } from '../src/index.ts'
 
@@ -625,5 +627,92 @@ describe('taking snapshots into the project repository', () => {
     assert.equal(await sh('git', 'show', 'tm/pkg:src/user.ts'), 'user\n')
     await tm.commitTo(entry.id, undefined, false)
     assert.equal((await sh('git', 'show', '--name-only', '--format=', 'HEAD')).trim(), 'pkg/app.ts')
+  })
+})
+
+describe('the heat map', () => {
+  test('counts Claude lines, later turns, undos and outside lines per file', async () => {
+    await turn('first', () => put('src/auth.ts', 'A\nB\nC\n'))
+    await put('src/auth.ts', 'A\nB\nC\nmine\n')
+    await turn('second', async () => {
+      await put('src/auth.ts', 'A\nB\nC\nmine\nD\n')
+      await put('lib/util.ts', 'u\n')
+    })
+    const undone = await turn('third', () => put('src/user.ts', 'user\nmore\n'))
+    assert.ok(undone)
+    await tm.undo(undone.id)
+
+    const heat = await tm.heat()
+    const byPath = new Map(heat.files.map(one => [one.path, one]))
+    assert.equal(heat.turns, 3)
+    assert.deepEqual(byPath.get('src/auth.ts'), {
+      path: 'src/auth.ts',
+      claude: 3,
+      edits: 2,
+      turns: 2,
+      undos: 0,
+      human: 1,
+    })
+    assert.equal(byPath.get('lib/util.ts')?.claude, 1)
+    assert.equal(byPath.get('src/user.ts')?.undos, 1)
+
+    const tree = heatTree(heat.files)
+    assert.equal(tree.files, 3)
+    assert.equal(nodeAt(tree, 'src')?.rework, 1)
+    assert.equal(nodeAt(tree, 'src')?.claude, 4)
+    assert.match(heatText(heat, 'rework', 5), /src\/auth\.ts\s+back in 1 later turn/)
+    assert.match(heatText(heat, 'undo', 5), /src\/user\.ts\s+1 undo/)
+  })
+
+  test('only counts the window asked for', async () => {
+    await turn('old', () => put('src/auth.ts', 'A\nB\n'))
+    const heat = await tm.heat(Date.now() + 60_000)
+    assert.deepEqual(heat.files, [])
+    assert.equal(heat.turns, 0)
+  })
+})
+
+describe('the heat map drawing', () => {
+  const files = [
+    { path: 'src/app/a.ts', claude: 40, edits: 3, turns: 2, undos: 0, human: 0 },
+    { path: 'src/app/b.ts', claude: 10, edits: 1, turns: 1, undos: 1, human: 5 },
+    { path: 'src/app/deep/c.ts', claude: 5, edits: 1, turns: 1, undos: 0, human: 0 },
+  ]
+
+  test('squarify fills the rectangle without overlaps', () => {
+    const rects = squarify([6, 6, 4, 3, 2, 2, 1], { x: 0, y: 0, w: 6, h: 4 })
+    const area = rects.reduce((sum, r) => sum + r.w * r.h, 0)
+    assert.ok(Math.abs(area - 24) < 1e-9)
+    for (const r of rects) assert.ok(r.x >= -1e-9 && r.y >= -1e-9 && r.x + r.w <= 6 + 1e-9 && r.y + r.h <= 4 + 1e-9)
+  })
+
+  test('a folder of one folder is skipped, and going up skips it again', () => {
+    const tree = heatTree(files)
+    const top = viewOf(tree, '', 'churn', { turns: 2, since: 0 }, null)
+    assert.equal(top.path, 'src/app')
+    assert.deepEqual(
+      top.nodes.map(node => node.name),
+      ['a.ts', 'b.ts', 'deep'],
+    )
+    assert.equal(top.nodes[0]?.children, undefined)
+    assert.equal(parentOf(tree, 'src/app/deep'), 'src/app')
+    assert.equal(parentOf(tree, 'src/app'), '')
+  })
+
+  test('terminal cells are whole triplets with the labels in them', () => {
+    const tree = heatTree(files)
+    const view = viewOf(tree, '', 'churn', { turns: 2, since: 0 }, null)
+    const bytes = Buffer.from(rasterCells(view.nodes, 'churn', 40, 8), 'base64')
+    assert.equal(bytes.length, 40 * 8 * 12)
+    const words = new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.length / 4)
+    const text = Array.from({ length: 40 * 8 }, (_, i) => String.fromCodePoint(words[i * 3] ?? 32)).join('')
+    assert.match(text, /a\.ts/)
+  })
+
+  test('the page is self-contained and cannot be broken out of by a file name', () => {
+    const tree = heatTree([{ ...files[0]!, path: 'x/</script><b>.ts' }])
+    const page = heatPage({ project: '/work/p', tree, turns: 1, since: 0, made: 0 })
+    assert.equal(page.match(/<\/script>/g)?.length, 1)
+    assert.doesNotMatch(page, /src="http|href="http/)
   })
 })

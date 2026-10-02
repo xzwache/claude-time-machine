@@ -16,7 +16,10 @@ import {
   statusMark,
   stepLabel,
 } from './format.ts'
-import type { Entry, Mode } from '../types'
+import { METRICS, heatText, heatTree } from './heat.ts'
+import type { Heat } from './heat.ts'
+import { heatPage } from './heat-page.ts'
+import type { Entry, HeatMetric, HeatNode, Mode } from '../types'
 
 export type Host = {
   machine: () => Promise<TimeMachine>
@@ -34,6 +37,10 @@ export type Host = {
   copy: (text: string) => Promise<boolean>
   retention: () => Promise<number | null>
   setRetention: (days: number | null) => Promise<void>
+  /** Opens the heat pane on the tree; false when it could not open here. */
+  showHeat: (tree: HeatNode, heat: Heat, metric: HeatMetric, page: string | null) => Promise<boolean>
+  /** Opens a local file with the system's default app; false when it could not. */
+  openFile: (path: string) => Promise<boolean>
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -53,6 +60,8 @@ export const HELP = [
   '  patch [N]                 turn N as a patch file (also copied to the clipboard)',
   '  retain 30d | off          prune snapshots older than that, once a day',
   '  prune 30d | prune 50      forget old snapshots (by age, or keep the newest N)',
+  '  heat [30d] [rework|undo|owner]  where Claude worked: a map of the project, hottest files',
+  '  heat open [30d]           the same map as an interactive page in your browser',
   '  stats                     snapshots, disk use and mode for this project',
   '  projects [rm N --yes]     every project with a history; delete one',
   '  git                       the git command to browse the timeline yourself',
@@ -136,6 +145,8 @@ export async function runCommand(host: Host, args: string): Promise<string> {
         const stats = await tm.stats()
         return `${plural(stats.entries, 'snapshot')}, ${size(stats.bytes)} at ${tm.gitDir}; mode ${await host.mode()}`
       }
+      case 'heat':
+        return await heatCommand(host, tm, rest)
       case 'prune':
         return await pruneCommand(host, tm, arg)
       case 'retain':
@@ -185,6 +196,40 @@ async function showText(tm: TimeMachine, entry: Entry, number: string): Promise<
       : []),
     ...(entry.answer !== '' ? ['Answer:', `  ${clip(oneLine(entry.answer), 400)}`] : []),
   ].join('\n')
+}
+
+async function heatCommand(host: Host, tm: TimeMachine, rest: string[]): Promise<string> {
+  const days = rest.map(daysOf).find(found => found !== undefined)
+  const metric = (rest.find(word => (METRICS as string[]).includes(word)) as HeatMetric | undefined) ?? 'churn'
+  const heat = await tm.heat(days === undefined ? null : Date.now() - days * DAY_MS)
+  const tree = heatTree(heat.files)
+  if (tree.files === 0) return 'Nothing to map yet: the heat map fills in as Claude changes files.'
+  if (rest.includes('open')) {
+    const page = await writeHeatPage(host, tm, tree, heat)
+    const opened = await host.openFile(page)
+    await host.showHeat(tree, heat, metric, page)
+    return opened
+      ? `Opened the heat map in your browser: ${page}`
+      : `Wrote the heat map to ${page}; open it in a browser.`
+  }
+  const isPlaced = await host.showHeat(tree, heat, metric, null)
+  const more = isPlaced
+    ? 'The map is in the Heat pane; /tm heat open shows it in your browser.'
+    : '/tm heat open shows the map in your browser.'
+  return `${heatText(heat, metric, 15)}
+
+${more}`
+}
+
+/** Writes the interactive page for this project; returns its path. */
+export async function writeHeatPage(host: Host, tm: TimeMachine, tree: HeatNode, heat: Heat): Promise<string> {
+  const name = tm.gitDir.slice(tm.gitDir.lastIndexOf('/') + 1).replace(/\.git$/, '')
+  const path = `${await host.home()}/heat/${name}.html`
+  await host.writeFile(
+    path,
+    heatPage({ project: tm.root, tree, turns: heat.turns, since: heat.since, made: Date.now() }),
+  )
+  return path
 }
 
 async function retainCommand(host: Host, tm: TimeMachine, arg: string | undefined): Promise<string> {
