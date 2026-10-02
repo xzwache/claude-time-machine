@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -12,17 +13,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+      - run: npm ci
       # The mod API is early access: pin the Claude Code build it is developed against.
-      - run: npm install -g @anthropic-ai/claude-code@2.1.287 typescript@6.0.2
-      - name: Core tests (real git)
+      - run: npm install -g @anthropic-ai/claude-code@2.1.287
+      - name: Format
+        run: npm run lint
+      - name: Unit tests
         run: npm test
-      - name: Validate the plugin and the marketplace
-        run: claude plugin validate . --strict
-      - name: Mod tests in Claude Code's test engine
-        run: claude plugin test .
-      # Loading the mod lays .claude-plugin/types, which the typecheck reads.
-      # A mod command answers locally, so this needs no credentials.
-      - name: Load the mod (lays its types)
-        run: npm run types
+      - name: Validate plugin and marketplace
+        run: npm run validate
+      - name: Mod tests
+        run: npm run test:mod
+      # Loading the mod lays .claude-plugin/types for the typecheck. A /tm
+      # command is answered by the mod itself, so this needs no credentials.
       - name: Typecheck
-        run: tsc -p .
+        run: npm run types && npm run typecheck
+      - name: Versions agree
+        run: node scripts/check-version.ts
