@@ -253,6 +253,18 @@ describe('the pane', () => {
       await ui.unmount()
     }
   })
+
+  test('travels to the picked snapshot after a second press', async ($, on) => {
+    fakeHost(on, { log: LOG, 'diff-tree': DIFF })
+    await $.command.run(typed('log'))
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'e-0' })
+    expect(await ui.find({ key: 'after', text: 'Travel here' })).toBeDefined()
+    expect(await ui.find({ key: 'before', text: 'Travel to before' })).toBeDefined()
+    await ui.press({ key: 'after' })
+    expect(await ui.find({ key: 'after', text: 'Confirm: travel here' })).toBeDefined()
+    await ui.unmount()
+  })
 })
 
 // A step and an outside commit, as `git log` and `diff-tree --numstat` print them for /tm heat.
