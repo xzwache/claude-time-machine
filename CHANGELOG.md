@@ -6,6 +6,12 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+### Changed
+
+- The pane's **Travel to after** is now **Travel here** and comes first; it also works on the baseline and checkpoints.
+- The band says that ctrl+x tab focuses it. Its keys (`u`, `r`, `x`) only work while it has focus, and some terminals,
+  such as Warp, don't pass clicks to it.
+
 ## [0.7.1] - 2026-10-02
 
 ### Security

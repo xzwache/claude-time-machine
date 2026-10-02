@@ -78,6 +78,8 @@ executable, a mass delete), a second line says what, with **Undo these** (`x`) t
 ⚠ CI config · deps +left-pad · install script    [ Undo these ]
 ```
 
+The keys work once the band has focus: click it or press ctrl+x tab. `/tm undo` works everywhere.
+
 | Command                         | What it does                                                        |
 | ------------------------------- | ------------------------------------------------------------------- |
 | `/tm`                           | Open the pane: timeline, steps, files and diffs                     |

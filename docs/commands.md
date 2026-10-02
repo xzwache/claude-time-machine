@@ -13,8 +13,8 @@ the name of a saved checkpoint (`"before refactor"`).
 | `/tm stats`               | Number of snapshots, disk use and mode of this project.                                              |
 | `/tm git`                 | Prints the git command for browsing the history yourself.                                            |
 
-In the pane, **Undo this** reverts the selected turn or step. **Travel to before** and **Travel to after** move the
-whole project and ask for a second press.
+In the pane, **Undo this** reverts the selected turn or step. **Travel here** puts the whole project in the state of
+the selected snapshot, **Travel to before** in the state just before it; both ask for a second press.
 
 ## Heat map
 

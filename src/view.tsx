@@ -35,10 +35,11 @@ export function bandView(table: Table, shown: Band, columns: number, on: BandHan
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" gap={1}>
-        <Text dimColor>{clip(`⏱ Claude changed ${shown.summary}`, Math.max(10, columns - 34))}</Text>
+        <Text dimColor>{clip(`⏱ Claude changed ${shown.summary}`, Math.max(10, columns - 50))}</Text>
         <Button key="tm-undo" variant="primary" hotkey="u" label="Undo turn" onPress={on.undo} />
         <Button key="tm-review" hotkey="r" label="Review" onPress={on.review} />
         {close}
+        {columns >= 90 && <Text dimColor>ctrl+x tab: keys</Text>}
       </Box>
       {shown.alert !== null && (
         <Box flexDirection="row" gap={1}>
@@ -76,8 +77,10 @@ export function paneView(table: Table, data: PaneData, on: PaneHandlers): Render
   const row = (key: string, isOn: boolean, label: string, onPress: () => void) => (
     <Button key={key} plain dimColor={!isOn} label={clip(`${isOn ? '▸' : ' '} ${label}`, columns)} onPress={onPress} />
   )
-  const travel = (where: 'before' | 'after', id: string) =>
-    asked === `${where}:${id}` ? `Confirm: travel ${where}` : `Travel to ${where}`
+  const travel = (where: 'before' | 'after', id: string) => {
+    const label = where === 'after' ? 'here' : 'to before'
+    return asked === `${where}:${id}` ? `Confirm: travel ${label}` : `Travel ${label}`
+  }
 
   return (
     <Box flexDirection="column">
@@ -121,18 +124,20 @@ export function paneView(table: Table, data: PaneData, on: PaneHandlers): Render
               <Text dimColor>…and {shown.changes.length + shown.more - 30} more</Text>
             )}
           </Box>
-          {focus.parent !== null && (
-            <Box flexDirection="row" gap={1} marginTop={1}>
+          <Box flexDirection="row" gap={1} marginTop={1}>
+            {focus.parent !== null && (
               <Button
                 key="undo"
                 variant="primary"
                 label={focus.id === entry.id ? 'Undo this' : 'Undo this step'}
                 onPress={() => on.perform('undo', focus)}
               />
+            )}
+            <Button key="after" label={travel('after', focus.id)} onPress={() => on.perform('after', focus)} />
+            {focus.parent !== null && (
               <Button key="before" label={travel('before', focus.id)} onPress={() => on.perform('before', focus)} />
-              <Button key="after" label={travel('after', focus.id)} onPress={() => on.perform('after', focus)} />
-            </Box>
-          )}
+            )}
+          </Box>
           {shown.file !== null && diffView(table, shown.diff, shown.file)}
         </Box>
       )}
