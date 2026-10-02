@@ -1,8 +1,8 @@
 <h1 align="center">Claude Time Machine</h1>
 
 <p align="center">
-  <strong>Undo for Claude Code that also covers Bash.</strong><br>
-  Every turn is a snapshot. Review it step by step, undo it, or travel back.
+  <strong>Undo anything Claude Code does to your project.</strong><br>
+  Edits and shell commands alike. Every turn is a snapshot: review it, undo it step by step, or travel back.
 </p>
 
 <p align="center">
