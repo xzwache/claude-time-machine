@@ -57,6 +57,8 @@ export type Project = {
 /** What the pane shows for the selected snapshot. */
 export type Details = {
   id: string
+  /** The entry selected, without its file list: the timeline shown may not reach back to it. */
+  entry: Entry | null
   steps: Entry[]
   /** The first files, and how many more there are. */
   changes: Change[]
@@ -72,7 +74,7 @@ export type Band = {
   result: string | null
 }
 
-/** What the heat map colors by: Claude's lines, files Claude came back to in later turns, undos, or who wrote it. */
+/** What the heat map colors by: Claude's lines, later turns back at a file, undos, or Claude's share. */
 export type HeatMetric = 'churn' | 'rework' | 'undo' | 'owner'
 
 /** A file or folder of the heat map, with the sums of everything under it. */
@@ -83,8 +85,7 @@ export type HeatNode = {
   /** Lines added plus deleted by Claude's steps. */
   claude: number
   /** Lines added plus deleted by anything else. */
-  human: number
-  /** Claude's steps that changed it. */
+  others: number
   edits: number
   /** Later turns that came back to a file Claude had already changed. */
   rework: number
@@ -93,16 +94,25 @@ export type HeatNode = {
   children?: HeatNode[]
 }
 
+/** A turn that changed the file picked in the heat pane. */
+export type HeatTurn = { id: string; title: string; time: number }
+
 /** What the heat pane shows: one folder's children, and how to color them. */
 export type HeatView = {
   metric: HeatMetric
   /** The folder shown, '' for the project root. */
   path: string
-  /** Its children, the biggest first, without their own children. */
+  /** Where Up goes; null at the top. */
+  parent: string | null
+  /** The start of the window read, ms; null for the whole history. */
+  from: number | null
+  /** The folder's children, biggest first, without their own. */
   nodes: HeatNode[]
   total: HeatNode
   turns: number
   since: number
+  /** The file picked, with the turns that changed it. */
+  file: { path: string; turns: HeatTurn[] } | null
   /** The interactive page, once written. */
   page: string | null
   notice: string

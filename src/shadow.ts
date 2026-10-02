@@ -231,6 +231,15 @@ export class ShadowRepo {
     return options.trim === false ? result.stdout : result.stdout.trim()
   }
 
+  /** git's whole output, or undefined when it was too large to be read whole. */
+  async gitComplete(args: string[], options: Pick<GitOptions, 'stdin'> = {}): Promise<string | undefined> {
+    const init: ExecInit = { cwd: this.root, env: this.env() }
+    if (options.stdin !== undefined) init.stdin = options.stdin
+    const result = await this.run(['git', ...GIT_FLAGS, ...args], init)
+    if (result.exitCode !== 0) throw new GitError(args, result)
+    return result.isStdoutTruncated ? undefined : result.stdout
+  }
+
   async succeeds(args: string[]): Promise<boolean> {
     return (await this.run(['git', ...GIT_FLAGS, ...args], { env: this.env() })).exitCode === 0
   }

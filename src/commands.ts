@@ -19,7 +19,7 @@ import {
 import { METRICS, heatText, heatTree } from './heat.ts'
 import type { Heat } from './heat.ts'
 import { heatPage } from './heat-page.ts'
-import type { Entry, HeatMetric, HeatNode, Mode } from '../types'
+import type { Entry, HeatMetric, Mode } from '../types'
 
 export type Host = {
   machine: () => Promise<TimeMachine>
@@ -37,13 +37,14 @@ export type Host = {
   copy: (text: string) => Promise<boolean>
   retention: () => Promise<number | null>
   setRetention: (days: number | null) => Promise<void>
-  /** Opens the heat pane on the tree; false when it could not open here. */
-  showHeat: (tree: HeatNode, heat: Heat, metric: HeatMetric, page: string | null) => Promise<boolean>
+  /** Opens the Heat pane; false when it could not open here. */
+  showHeat: (heat: Heat, from: number | null, metric: HeatMetric) => Promise<boolean>
   /** Opens a local file with the system's default app; false when it could not. */
   openFile: (path: string) => Promise<boolean>
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
+const HEAT_FILES = 15
 
 export const HELP = [
   'Usage: /tm [command]',
@@ -200,35 +201,34 @@ async function showText(tm: TimeMachine, entry: Entry, number: string): Promise<
 
 async function heatCommand(host: Host, tm: TimeMachine, rest: string[]): Promise<string> {
   const days = rest.map(daysOf).find(found => found !== undefined)
-  const metric = (rest.find(word => (METRICS as string[]).includes(word)) as HeatMetric | undefined) ?? 'churn'
-  const heat = await tm.heat(days === undefined ? null : Date.now() - days * DAY_MS)
-  const tree = heatTree(heat.files)
-  if (tree.files === 0) return 'Nothing to map yet: the heat map fills in as Claude changes files.'
+  const metric = METRICS.find(one => rest.includes(one)) ?? 'churn'
+  const from = days === undefined ? null : Date.now() - days * DAY_MS
+  const heat = await tm.heat(from)
+  if (heat.files.length === 0) return 'Nothing to map yet: the heat map fills in as Claude changes files.'
   if (rest.includes('open')) {
-    const page = await writeHeatPage(host, tm, tree, heat)
-    const opened = await host.openFile(page)
-    await host.showHeat(tree, heat, metric, page)
-    return opened
+    const page = await writeHeatPage(host, tm, heat)
+    return (await host.openFile(page))
       ? `Opened the heat map in your browser: ${page}`
       : `Wrote the heat map to ${page}; open it in a browser.`
   }
-  const isPlaced = await host.showHeat(tree, heat, metric, null)
-  const more = isPlaced
+  const where = (await host.showHeat(heat, from, metric))
     ? 'The map is in the Heat pane; /tm heat open shows it in your browser.'
     : '/tm heat open shows the map in your browser.'
-  return `${heatText(heat, metric, 15)}
-
-${more}`
+  return `${heatText(heat, metric, HEAT_FILES)}\n\n${where}`
 }
 
 /** Writes the interactive page for this project; returns its path. */
-export async function writeHeatPage(host: Host, tm: TimeMachine, tree: HeatNode, heat: Heat): Promise<string> {
+export async function writeHeatPage(host: Host, tm: TimeMachine, heat: Heat): Promise<string> {
   const name = tm.gitDir.slice(tm.gitDir.lastIndexOf('/') + 1).replace(/\.git$/, '')
   const path = `${await host.home()}/heat/${name}.html`
-  await host.writeFile(
-    path,
-    heatPage({ project: tm.root, tree, turns: heat.turns, since: heat.since, made: Date.now() }),
-  )
+  const page = heatPage({
+    project: tm.root,
+    tree: heatTree(heat.files),
+    turns: heat.turns,
+    since: heat.since,
+    made: Date.now(),
+  })
+  await host.writeFile(path, page)
   return path
 }
 
