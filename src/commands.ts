@@ -55,7 +55,7 @@ export const HELP = [
   '  log [N] [--session]       list snapshots, newest first',
   '  show N                    files, steps and answer of snapshot N',
   '  undo [N|N.k] [--force]    revert a turn (default: the latest) or one of its steps',
-  '  undo [N] --sensitive      revert only what the security diff flags in it',
+  '  undo [N] --sensitive      revert only its sensitive changes (CI, dependencies, secrets…)',
   '  redo                      undo the latest undo',
   '  travel N|name             put every file back to snapshot N or a saved checkpoint',
   '  save [name]               save the work tree now as a named checkpoint',

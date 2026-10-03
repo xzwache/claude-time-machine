@@ -1,4 +1,4 @@
-// The security diff: which of the files a turn changed deserve a second look.
+// Sensitive changes: which of the files a turn changed deserve a second look.
 // CI and git hooks, dependencies and install scripts, secrets, container and
 // infrastructure config, new executables and mass deletes. Judged on what
 // landed on disk, so a change made through Bash counts like one made by Edit.

@@ -347,7 +347,7 @@ describe('secrets', () => {
     assert.equal(await read('src/user.ts'), 'user\n')
   })
 
-  test('the patterns snapshots leave out name the same files the security diff calls secrets', async () => {
+  test('the patterns snapshots leave out name the same files the sensitive-change check calls secrets', async () => {
     const paths = [
       '.env',
       'app/.env.local',
@@ -878,7 +878,7 @@ describe('the heat map drawing', () => {
   })
 })
 
-describe('the security diff', () => {
+describe('sensitive changes', () => {
   test('flags paths by what they are', () => {
     const kinds = Object.fromEntries(
       [

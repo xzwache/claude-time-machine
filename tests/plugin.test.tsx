@@ -214,7 +214,7 @@ describe('the band above the prompt', () => {
   })
 })
 
-describe('the security diff in the band', () => {
+describe('sensitive changes in the band', () => {
   const PROPS = {
     hasSurvey: false,
     isWorking: false,

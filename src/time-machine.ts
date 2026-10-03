@@ -222,7 +222,7 @@ export class TimeMachine {
     return this.serial(async () => undo(this.shadow, this.log, await this.required(ref), isForced))
   }
 
-  /** What the security diff flags among the paths an entry changed. */
+  /** The sensitive changes among the paths an entry changed. */
   findings(ref: string): Promise<Finding[]> {
     return this.serial(async () => {
       const entry = await this.required(ref)
@@ -230,7 +230,7 @@ export class TimeMachine {
     })
   }
 
-  /** Undoes only the paths the security diff flags; undefined when it flags none. */
+  /** Undoes only the sensitive changes; undefined when there are none. */
   undoSensitive(ref: string, isForced = false): Promise<RestoreReport | undefined> {
     return this.serial(async () => {
       const entry = await this.required(ref)

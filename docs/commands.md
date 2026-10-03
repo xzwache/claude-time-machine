@@ -46,12 +46,12 @@ thousands of files) is left out. The page uses no network and no model calls.
 | Command                       | What it does                                                                                                                                                                      |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/tm undo [N\|N.k] [--force]` | Reverts turn N, or step k of it. Without an argument, the latest turn. Files changed by someone else since are left alone and listed; `--force` overwrites them (still undoable). |
-| `/tm undo [N] --sensitive`    | Reverts only the files the security diff flags in turn N, and leaves the rest of the turn as it is.                                                                               |
+| `/tm undo [N] --sensitive`    | Reverts only the sensitive changes flagged in turn N, and leaves the rest of the turn as it is.                                                                                   |
 | `/tm redo`                    | Reverts the latest undo.                                                                                                                                                          |
 | `/tm travel N\|name`          | Puts every file back to how it was at snapshot N or a saved checkpoint.                                                                                                           |
 | `/tm save [name]`             | Saves the project as it is now under a name.                                                                                                                                      |
 
-## Security diff
+## Sensitive changes
 
 After every turn, the files Claude changed are checked for what deserves a second look. It is judged on what landed on
 disk, so a change made through Bash counts like one made by Edit. The band names what it found and offers **Undo
