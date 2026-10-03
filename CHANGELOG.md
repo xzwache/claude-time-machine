@@ -6,6 +6,8 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-03
+
 ### Fixed
 
 - The band's keys are digits, pressed at an empty prompt as you answer Claude Code's surveys: 1 undoes the turn, 2
@@ -32,12 +34,7 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 - The band says what a turn did in a sentence: "Claude edited 3 files, created 12 and deleted 4" instead of
   "Claude changed 3 modified · 12 created · 4 deleted".
 - Undo, redo and travel say what they did the same way: "Restored 3 files, removed 12 and brought back 4".
-
-### Changed
-
 - The pane's **Travel to after** is now **Travel here** and comes first; it also works on the baseline and checkpoints.
-- The band says that ctrl+x tab focuses it. Its keys (`u`, `r`, `x`) only work while it has focus, and some terminals,
-  such as Warp, don't pass clicks to it.
 
 ## [0.7.1] - 2026-10-02
 
@@ -147,7 +144,8 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 - First release: a snapshot before and after every turn in a shadow git repository, `/tm` pane, `/tm undo`,
   `/tm redo`, `/tm travel`, `/tm log`.
 
-[Unreleased]: https://github.com/xzwache/claude-time-machine/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/xzwache/claude-time-machine/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/xzwache/claude-time-machine/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/xzwache/claude-time-machine/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xzwache/claude-time-machine/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/xzwache/claude-time-machine/compare/v0.5.0...v0.6.0
