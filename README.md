@@ -19,21 +19,9 @@
   <img src="https://img.shields.io/badge/Claude%20Code-plugin-d97757" alt="Claude Code plugin">
 </p>
 
-<!-- demo.gif: a turn, the band, pressing 1 twice, the files coming back -->
-
-```
-⏱ Claude edited 2 files and deleted 1   1: Undo turn  2: Review  ×
-
-> /tm show 1
-claude · add login form (19a9e6f)
-  M src/app.ts
-  A src/login.ts
-  D src/legacy.ts
-Steps:
-  1.1 Edit src/app.ts  ~1
-  1.2 Write src/login.ts  +1
-  1.3 Bash: rm src/legacy.ts && npm run format  ~1 -1
-```
+<p align="center">
+  <img src="docs/screenshots/02-restored.png" width="900" alt="Claude deletes two files through Bash, /tm undo brings them back">
+</p>
 
 ## Why
 
@@ -105,6 +93,8 @@ and keep the plugin, use `/tm projects rm N --yes`.
 
 ## Use
 
+![The band after a turn: Undo turn and Review](docs/screenshots/01-undo-turn.png)
+
 After a turn that changed files, a band above the prompt says what Claude did and offers **1: Undo turn** and
 **2: Review**. When the turn touched something that deserves a second look (CI config, dependencies or an install
 script, a secrets file, a new executable, a mass delete), a second line says what, with **3: Undo these** to revert only
@@ -133,6 +123,8 @@ one stray digit undoes nothing, and `/tm redo` brings back any undo. `/tm undo` 
 | `/tm heat` · `/tm heat open`    | Map of where Claude worked · the same map in your browser           |
 
 All commands, modes and settings: [docs/commands.md](docs/commands.md).
+
+![Heat map of where Claude worked](docs/screenshots/06-heat-map.png)
 
 ## How it works
 
