@@ -15,6 +15,7 @@ import {
   size,
   statusMark,
   stepLabel,
+  summaryLine,
 } from './format.ts'
 import { METRICS, heatText, heatTree } from './heat.ts'
 import type { Heat } from './heat.ts'
@@ -42,6 +43,8 @@ export type Host = {
   showHeat: (heat: Heat, from: number | null, metric: HeatMetric) => Promise<boolean>
   /** Opens a local file with the system's default app; false when it could not. */
   openFile: (path: string) => Promise<boolean>
+  /** Shows what a restore did in the band, so it no longer offers to undo what is undone. */
+  showResult: (text: string) => Promise<void>
   isKeepingSecrets: () => Promise<boolean>
   setKeepingSecrets: (isKeeping: boolean) => Promise<void>
 }
@@ -129,9 +132,11 @@ export async function runCommand(host: Host, args: string): Promise<string> {
         if (flags.has('--sensitive')) {
           const done = await tm.undoSensitive(entry.id, isForced)
           if (!done) return `Nothing in ${kindLabel(entry)} "${entry.title}" is flagged as sensitive.`
+          await host.showResult(summaryLine(done, entry.id))
           return `Undo the sensitive changes of ${kindLabel(entry)} "${entry.title}":\n${restoreText(done, entry.id)}`
         }
         const done = await tm.undo(entry.id, isForced)
+        await host.showResult(summaryLine(done, entry.id))
         return `Undo ${kindLabel(entry)} "${entry.title}":\n${restoreText(done, entry.id)}`
       }
       case 'redo': {
@@ -140,12 +145,15 @@ export async function runCommand(host: Host, args: string): Promise<string> {
           return 'Nothing to redo: the latest snapshot is not an undo.'
         }
         const done = await tm.undo(last.id, flags.has('--force'))
+        await host.showResult(summaryLine(done, last.id))
         return `Redo "${last.title.slice(6)}":\n${restoreText(done, last.id)}`
       }
       case 'travel': {
         if (!arg) return 'Name a snapshot: /tm travel 3, or a checkpoint: /tm travel "before refactor".'
         const entry = await resolveRef(tm, list, rest.join(' '))
-        return `Travelled to "${entry.title}":\n${restoreText(await tm.travel(entry.id), entry.id)}`
+        const done = await tm.travel(entry.id)
+        await host.showResult(summaryLine(done, entry.id))
+        return `Travelled to "${entry.title}":\n${restoreText(done, entry.id)}`
       }
       case 'save': {
         const name = rest.join(' ').replace(/^["']|["']$/g, '')

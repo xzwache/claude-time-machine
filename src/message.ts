@@ -64,7 +64,13 @@ export function undoTitle(title: string): string {
   return `Undo: ${title}`
 }
 
+const TITLE_CHARS = 80
+
+/** The first non-empty line, cut at a word with `…` when longer than a title takes. */
 export function firstLine(text: string): string {
-  const line = text.split('\n').find(one => one.trim() !== '') ?? ''
-  return line.trim().slice(0, 80)
+  const line = (text.split('\n').find(one => one.trim() !== '') ?? '').trim()
+  if (line.length <= TITLE_CHARS) return line
+  const cut = line.slice(0, TITLE_CHARS - 1)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > TITLE_CHARS / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
 }

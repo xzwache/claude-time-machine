@@ -55,7 +55,7 @@ thousands of files) is left out. The page uses no network and no model calls.
 
 After every turn, the files Claude changed are checked for what deserves a second look. It is judged on what landed on
 disk, so a change made through Bash counts like one made by Edit. The band names what it found and offers **Undo
-these** (`x`); `/tm show N` lists it under "Sensitive", and the pane marks those files with `⚠`.
+these** (`3`); `/tm show N` lists it under "Sensitive", and the pane marks those files with `⚠`.
 
 | Flag             | When                                                                                                                  |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- |

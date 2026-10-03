@@ -87,6 +87,8 @@ export type Band = {
   summary: string
   /** The turn's sensitive changes, as one line; null when there were none. */
   alert: string | null
+  /** The undo waiting for a second press: the whole turn or its sensitive changes. */
+  confirm: 'turn' | 'sensitive' | null
   result: string | null
 }
 

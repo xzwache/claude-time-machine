@@ -23,7 +23,8 @@ import type { FileHeat, Heat } from '../src/heat.ts'
 import { heatPage, pageLibrary } from '../src/heat-page.ts'
 import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
 import type { Deps, ExecResult } from '../src/index.ts'
-import { restoreText, turnSummary } from '../src/format.ts'
+import { ago, restoreText, turnSummary } from '../src/format.ts'
+import { firstLine } from '../src/message.ts'
 import { versionProblem } from '../src/version.ts'
 import {
   NOT_KEPT,
@@ -1053,5 +1054,21 @@ describe('the band', () => {
     assert.equal(restoreText(report(0, 2, 1), 'abc1234'), '✓ Removed 2 files and brought back 1')
     assert.equal(restoreText(report(1, 0, 0, 2), 'abc1234'), '✓ Restored 1 file\n· 2 files were already back')
     assert.equal(restoreText(report(0, 0, 0), 'abc1234'), 'Nothing to change: the files are already there.')
+  })
+})
+
+describe('times and titles', () => {
+  test('a time ago in seconds, minutes, hours or days', () => {
+    assert.equal(ago(2_000), 'just now')
+    assert.equal(ago(42_000), '42s ago')
+    assert.equal(ago(5 * 60_000 + 30_000), '5m ago')
+    assert.equal(ago(3 * 3_600_000), '3h ago')
+    assert.equal(ago(12 * 86_400_000), '12d ago')
+  })
+
+  test('a long prompt is cut at a word, with an ellipsis', () => {
+    const prompt = 'Delete the legacy module and every test that still imports it. Answer in one line please, thanks'
+    assert.equal(firstLine(prompt), 'Delete the legacy module and every test that still imports it. Answer in one…')
+    assert.equal(firstLine('\n  short prompt  \nmore'), 'short prompt')
   })
 })

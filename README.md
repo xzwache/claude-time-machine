@@ -19,10 +19,10 @@
   <img src="https://img.shields.io/badge/Claude%20Code-plugin-d97757" alt="Claude Code plugin">
 </p>
 
-<!-- demo.gif: a turn, the band, pressing u, the files coming back -->
+<!-- demo.gif: a turn, the band, pressing 1 twice, the files coming back -->
 
 ```
-⏱ Claude edited 2 files and deleted 1   [ Undo turn ]  [ Review ]  ×
+⏱ Claude edited 2 files and deleted 1   1: Undo turn  2: Review  ×
 
 > /tm show 1
 claude · add login form (19a9e6f)
@@ -105,16 +105,18 @@ and keep the plugin, use `/tm projects rm N --yes`.
 
 ## Use
 
-After a turn that changed files, a band above the prompt offers **Undo turn** (`u`) and **Review** (`r`). When the
-turn touched something that deserves a second look (CI config, dependencies or an install script, a secrets file, a new
-executable, a mass delete), a second line says what, with **Undo these** (`x`) to revert only that:
+After a turn that changed files, a band above the prompt says what Claude did and offers **1: Undo turn** and
+**2: Review**. When the turn touched something that deserves a second look (CI config, dependencies or an install
+script, a secrets file, a new executable, a mass delete), a second line says what, with **3: Undo these** to revert only
+that:
 
 ```
-⏱ Claude edited 2 files and created 2           [ Undo turn ]  [ Review ]  ×
-⚠ CI config · deps +left-pad · install script    [ Undo these ]
+⏱ Claude edited 2 files and created 2       1: Undo turn  2: Review  ×
+⚠ CI config · deps +left-pad · install script   3: Undo these
 ```
 
-The keys work once the band has focus: click it or press ctrl+x tab. `/tm undo` works everywhere.
+Press the digit at an empty prompt, as you answer Claude Code's surveys. An undo asks once more (**1: Yes, undo**), so
+one stray digit undoes nothing, and `/tm redo` brings back any undo. `/tm undo` works everywhere.
 
 | Command                         | What it does                                                        |
 | ------------------------------- | ------------------------------------------------------------------- |

@@ -69,8 +69,14 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('turn.start', async ($, e, next) => {
+  // The band belongs to the last turn until the person sends the next prompt: a
+  // turn Claude starts by itself (a background task finishing) leaves it be.
+  on('prompt.submit', async ($, e, next) => {
     await update($, band, () => null)
+    return next(e)
+  })
+
+  on('turn.start', async ($, e, next) => {
     const started = Date.now()
     await quietly($, (tm, session) => tm.beginTurn(e.turnId, e.text, session))
     const took = Date.now() - started
@@ -94,7 +100,7 @@ export const register: Register = on => {
           return []
         })
         const alert = findings.length > 0 ? alertLine(findings) : null
-        await update($, band, () => ({ id: entry.id, summary: turnSummary(entry), alert, result: null }))
+        await update($, band, () => ({ id: entry.id, summary: turnSummary(entry), alert, confirm: null, result: null }))
         await refresh($, tm)
       }
       void tm.maintain().catch(error => report($, error))
@@ -146,8 +152,10 @@ export const register: Register = on => {
     if (shown === null || e.props.hasSurvey || e.props.isWorking) return next(e)
 
     return bandView($.ui.resolve(e), shown, Math.max(20, e.props.bodyColumns), {
-      undo: () => void undoFromBand($, shown.id, false),
-      undoSensitive: () => void undoFromBand($, shown.id, true),
+      undo: () => void update($, band, now => now && { ...now, confirm: 'turn' as const }),
+      undoSensitive: () => void update($, band, now => now && { ...now, confirm: 'sensitive' as const }),
+      confirm: () => void undoFromBand($, shown.id, shown.confirm === 'sensitive'),
+      cancel: () => void update($, band, now => now && { ...now, confirm: null }),
       review: () => void openPane($, shown.id),
       close: () => void update($, band, () => null),
     })
@@ -219,6 +227,9 @@ function hostOf($: EngineInterface): Host {
     },
     setRetention: async days => $.store.set(`retain:${await digest(await $.session.root())}`, days),
     showHeat: (read, from, metric) => showHeat($, read, from, metric),
+    showResult: async text => {
+      await update($, band, now => now && { ...now, confirm: null, result: `⏱ ${text}` })
+    },
     isKeepingSecrets: async () => (await $.store.get(`secrets:${await digest(await $.session.root())}`)) === 'keep',
     setKeepingSecrets: async isKeeping => {
       const key = `secrets:${await digest(await $.session.root())}`
@@ -375,8 +386,10 @@ async function refresh($: EngineInterface, tm: TimeMachine): Promise<Entry[]> {
   // one entry's files when it is selected.
   await update($, entries, () => list.map(entry => ({ ...entry, changes: [] })))
   const mode = await modeOf($)
-  const turns = list.filter(entry => entry.kind === 'turn').length
-  $.ui.status(mode === 'auto' ? `⏱ ${plural(turns, 'turn')} on the timeline` : `⏱ time machine: ${mode}`)
+  const session = await $.session.id()
+  const turns = list.filter(entry => entry.kind === 'turn' && entry.session === session).length
+  const status = turns === 0 ? '⏱ time machine on' : `⏱ ${plural(turns, 'turn')} this session, undoable`
+  $.ui.status(mode === 'auto' ? status : `⏱ time machine: ${mode}`)
   return list
 }
 
@@ -433,7 +446,7 @@ async function undoFromBand($: EngineInterface, id: string, isSensitiveOnly: boo
   } catch (error) {
     result = report($, error)
   }
-  await update($, band, shown => shown && { ...shown, result })
+  await update($, band, shown => shown && { ...shown, confirm: null, result })
 }
 
 async function select($: EngineInterface, id: string): Promise<void> {
@@ -477,7 +490,9 @@ async function perform($: EngineInterface, action: 'undo' | 'before' | 'after', 
     const before = entry.base ?? entry.parent
     const target = action === 'before' && before !== null ? before : entry.id
     const done = action === 'undo' ? await tm.undo(entry.id) : await tm.travel(target)
-    await update($, notice, () => summaryLine(done, entry.id))
+    const said = summaryLine(done, entry.id)
+    await update($, notice, () => said)
+    await update($, band, now => now && { ...now, confirm: null, result: `⏱ ${said}` })
     const list = await refresh($, tm)
     if (list[0]) await select($, list[0].id)
   } catch (error) {

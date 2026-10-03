@@ -15,10 +15,17 @@ type Table = ReturnType<EngineInterface['ui']['resolve']>
 export type BandHandlers = {
   undo: () => void
   undoSensitive: () => void
+  confirm: () => void
+  cancel: () => void
   review: () => void
   close: () => void
 }
 
+/**
+ * The band, its keys digits: a bare digit at an empty prompt presses a band
+ * Button, as it answers a survey, with no need to focus the band first. An
+ * undo asks once more, so one stray digit undoes nothing.
+ */
 export function bandView(table: Table, shown: Band, columns: number, on: BandHandlers): RenderElement {
   const { Box, Text, Button } = table
   const close = <Button key="tm-close" role="dismiss" label="×" onPress={on.close} />
@@ -32,19 +39,29 @@ export function bandView(table: Table, shown: Band, columns: number, on: BandHan
     )
   }
 
+  if (shown.confirm === 'turn' || shown.confirm === 'sensitive') {
+    const question = shown.confirm === 'turn' ? 'Undo this turn?' : `Undo only ${shown.alert ?? 'the flagged files'}?`
+    return (
+      <Box flexDirection="row" gap={2}>
+        <Text bold>{clip(`⏱ ${question}`, Math.max(10, columns - 30))}</Text>
+        <Button key="tm-yes" plain hotkey="1" label="Yes, undo" onPress={on.confirm} />
+        <Button key="tm-no" plain hotkey="2" label="No" onPress={on.cancel} />
+      </Box>
+    )
+  }
+
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" gap={1}>
-        <Text dimColor>{clip(`⏱ ${shown.summary}`, Math.max(10, columns - 50))}</Text>
-        <Button key="tm-undo" variant="primary" hotkey="u" label="Undo turn" onPress={on.undo} />
-        <Button key="tm-review" hotkey="r" label="Review" onPress={on.review} />
+      <Box flexDirection="row" gap={2}>
+        <Text dimColor>{clip(`⏱ ${shown.summary}`, Math.max(10, columns - 34))}</Text>
+        <Button key="tm-undo" plain hotkey="1" label="Undo turn" onPress={on.undo} />
+        <Button key="tm-review" plain hotkey="2" label="Review" onPress={on.review} />
         {close}
-        {columns >= 90 && <Text dimColor>ctrl+x tab: keys</Text>}
       </Box>
       {shown.alert !== null && (
-        <Box flexDirection="row" gap={1}>
-          <Text color="yellow">{clip(`⚠ ${shown.alert}`, Math.max(10, columns - 18))}</Text>
-          <Button key="tm-undo-sensitive" hotkey="x" label="Undo these" onPress={on.undoSensitive} />
+        <Box flexDirection="row" gap={2}>
+          <Text color="yellow">{clip(`⚠ ${shown.alert}`, Math.max(10, columns - 20))}</Text>
+          <Button key="tm-undo-sensitive" plain hotkey="3" label="Undo these" onPress={on.undoSensitive} />
         </Box>
       )}
     </Box>
