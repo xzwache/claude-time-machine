@@ -6,6 +6,19 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+### Fixed
+
+- The band's keys are digits, pressed at an empty prompt as you answer Claude Code's surveys: 1 undoes the turn, 2
+  reviews it, 3 undoes its sensitive changes. Before, they needed the band to have the focus, which some terminals
+  (Warp) never gave it. An undo asks once more, so one stray digit undoes nothing.
+- The band stays until you send the next prompt. A turn Claude starts by itself, such as after a background task ends,
+  no longer clears it.
+- After `/tm undo`, `/tm redo` or `/tm travel`, and an undo from the pane, the band shows what was done instead of
+  still offering to undo the turn.
+- A long prompt is cut at a word with `…` in titles, not in the middle of one.
+- `/tm projects` says when a project last changed in seconds, minutes, hours or days, not "0d ago".
+- The status line counts this session's turns ("3 turns this session, undoable"), not every turn of the project.
+
 ### Added
 
 - On a Claude Code older than 2.1.287, the time machine says so and stays off instead of half working.

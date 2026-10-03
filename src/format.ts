@@ -80,11 +80,22 @@ export function size(bytes: number): string {
 }
 
 export function projectLine(project: Project, i: number, isCurrent: boolean): string {
-  const days = Math.max(0, Math.round((Date.now() - project.lastTime) / DAY_MS))
-  const age = project.lastTime === 0 ? 'never' : `${days}d ago`
+  const age = project.lastTime === 0 ? 'never' : ago(Date.now() - project.lastTime)
   const gone = project.isRootPresent ? '' : '  (folder gone)'
   const name = project.root || project.name
-  return `${String(i + 1).padStart(2)}. ${isCurrent ? '▸' : ' '} ${name}  ${plural(project.entries, 'snapshot')}, ${size(project.bytes)}, last ${age}${gone}`
+  return `${String(i + 1).padStart(2)}. ${isCurrent ? '▸' : ' '} ${name}  ${plural(project.entries, 'snapshot')}, ${size(project.bytes)}, last change ${age}${gone}`
+}
+
+/** `just now`, `42s ago`, `5m ago`, `3h ago`, `12d ago`. */
+export function ago(elapsedMs: number): string {
+  const seconds = Math.max(0, Math.floor(elapsedMs / 1000))
+  if (seconds < 5) return 'just now'
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(elapsedMs / DAY_MS)}d ago`
 }
 
 export function restoreText(done: RestoreReport, id: string): string {

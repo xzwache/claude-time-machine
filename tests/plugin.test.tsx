@@ -223,14 +223,30 @@ describe('sensitive changes in the band', () => {
     scroll: { offset: 0, bodyRows: 3 },
     view: {},
   }
-  const withBand = (on: On, band: Record<string, unknown>) =>
+  // The band's state, kept here so presses that change it show on the next draw.
+  const withBand = (on: On, initial: Record<string, unknown>) => {
+    let band: unknown = initial
+    let version = 1
     on('state.get', (_, e, next) =>
-      e.plugin === 'time-machine' && e.key === 'band' ? { value: { value: band, version: 1 } } : next(e),
+      e.plugin === 'time-machine' && e.key === 'band' ? { value: { value: band, version } } : next(e),
     )
+    on('state.set', (_, e, next) => {
+      if (e.plugin !== 'time-machine' || e.key !== 'band') return next(e)
+      band = (e as { value: unknown }).value
+      version++
+      return { value: { isSet: true as const, version } }
+    })
+  }
 
   test('shows what was flagged and a button to undo only that, on every surface', async ($, on) => {
     fakeHost(on)
-    withBand(on, { id: ID, summary: 'Claude edited 2 files', alert: 'CI config · deps +left-pad', result: null })
+    withBand(on, {
+      id: ID,
+      summary: 'Claude edited 2 files',
+      alert: 'CI config · deps +left-pad',
+      confirm: null,
+      result: null,
+    })
     for (const surface of SURFACES) {
       const ui = await $.ui.mount({ plugin: 'time-machine', component: 'AbovePrompt', surface, props: PROPS })
       expect(await ui.find({ type: 'Text', text: '⏱ Claude edited 2 files' })).toBeDefined()
@@ -241,9 +257,34 @@ describe('sensitive changes in the band', () => {
     }
   })
 
+  test('digits press its buttons, and an undo asks once more', async ($, on) => {
+    fakeHost(on)
+    withBand(on, { id: ID, summary: 'Claude edited 2 files', alert: 'CI config', confirm: null, result: null })
+    const ui = await $.ui.mount({ plugin: 'time-machine', component: 'AbovePrompt', surface: 'terminal', props: PROPS })
+    for (const [key, hotkey, label] of [
+      ['tm-undo', '1', 'Undo turn'],
+      ['tm-review', '2', 'Review'],
+      ['tm-undo-sensitive', '3', 'Undo these'],
+    ] as const) {
+      const button = await ui.find({ type: 'Button', key, text: label })
+      expect(button?.props).toMatchObject({ hotkey, plain: true })
+    }
+    await ui.press({ key: 'tm-undo' })
+    await ui.redraw()
+    expect(await ui.find({ type: 'Text', text: '⏱ Undo this turn?' })).toBeDefined()
+    expect(await ui.find({ key: 'tm-yes' })).toBeDefined()
+    await ui.press({ key: 'tm-no' })
+    await ui.redraw()
+    expect(await ui.find({ key: 'tm-undo' })).toBeDefined()
+    await ui.press({ key: 'tm-undo-sensitive' })
+    await ui.redraw()
+    expect(await ui.find({ type: 'Text', text: '⏱ Undo only CI config?' })).toBeDefined()
+    await ui.unmount()
+  })
+
   test('keeps to one row when nothing was flagged', async ($, on) => {
     fakeHost(on)
-    withBand(on, { id: ID, summary: 'Claude edited 2 files', alert: null, result: null })
+    withBand(on, { id: ID, summary: 'Claude edited 2 files', alert: null, confirm: null, result: null })
     const ui = await $.ui.mount({ plugin: 'time-machine', component: 'AbovePrompt', surface: 'terminal', props: PROPS })
     expect(await ui.find({ key: 'tm-undo' })).toBeDefined()
     expect(await ui.find({ key: 'tm-undo-sensitive' })).toBeUndefined()
