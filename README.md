@@ -40,17 +40,20 @@ The time machine snapshots the whole project around every tool call, so:
 - **Local and private.** Plain git on your machine. The plugin makes no network requests, sends no telemetry and
   makes no model calls.
 
-|                                     | `/rewind`                 | Time machine                      |
-| ----------------------------------- | ------------------------- | --------------------------------- |
-| Changes made through Bash           | no                        | yes                               |
-| Undo one step of a turn             | no                        | yes                               |
-| Your edits made during a turn       | overwritten               | kept, or reported as a conflict   |
-| Several sessions in one project     | separate                  | one timeline, sessions kept apart |
-| How long history lasts              | 100 checkpoints, ~30 days | until you prune it                |
-| Turn a turn into a commit or branch | no                        | yes                               |
-| Rewind the conversation             | yes                       | no, use `/rewind` for that        |
+|                                                             | `/rewind`                                   | Time machine                      |
+| ----------------------------------------------------------- | ------------------------------------------- | --------------------------------- |
+| Files changed through Bash: `rm`, `mv`, codegen, formatters | not tracked                                 | tracked                           |
+| What you can undo                                           | a whole prompt                              | a whole turn or one step of it    |
+| Your edits made during a turn                               | not tracked                                 | kept, or reported as a conflict   |
+| Edits from other sessions in the project                    | not tracked                                 | one timeline, sessions kept apart |
+| How long history lasts                                      | last 100 checkpoints of a session, ~30 days | until you prune it                |
+| Flags CI, dependency, secret changes and mass deletes       | no                                          | yes, and undoes only those        |
+| Shows where Claude keeps rewriting code                     | no                                          | `/tm heat`                        |
+| Turns a turn into a commit or branch                        | no                                          | yes                               |
+| Rewinds the conversation                                    | yes                                         | no, use `/rewind` for that        |
 
-They work fine side by side.
+Claude Code's [checkpointing docs](https://code.claude.com/docs/en/checkpointing): "Checkpointing does not track files
+modified by Bash commands." Use `/rewind` for the conversation and the time machine for the files.
 
 ### Why not just…
 
