@@ -19,10 +19,6 @@
   <img src="https://img.shields.io/badge/Claude%20Code-plugin-d97757" alt="Claude Code plugin">
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/02-restored.png" width="900" alt="Claude deletes two files through Bash, /tm undo brings them back">
-</p>
-
 ## Why
 
 Claude Code's `/rewind` brings back files Claude changed with Edit and Write. A lot of real work goes through the
