@@ -16,6 +16,11 @@ export type RestoreReport = {
   conflicts: string[]
   /** Paths already back at the state being restored: nothing to do. */
   unchanged: string[]
+  /**
+   * Paths written again while the restore ran (a formatter or codegen still
+   * going): not at the state restored, so not counted as restored.
+   */
+  unsettled: string[]
   entry: Entry | undefined
 }
 
@@ -43,14 +48,18 @@ export async function undo(
   const isConflict = (plan: PathPlan) => !isForced && (changedSince.has(plan.path) || plan.isTainted)
   const apply = pending.filter(plan => !isConflict(plan))
   await applyPlans(shadow, apply)
-  const done =
-    apply.length === 0 ? undefined : await recordRestore(shadow, history, 'undo', undoTitle(entry.title), entry.id)
+  const { entry: done, unsettled } =
+    apply.length === 0
+      ? { entry: undefined, unsettled: new Set<string>() }
+      : await recordRestore(shadow, history, 'undo', undoTitle(entry.title), entry.id, apply)
+  const settled = apply.filter(plan => !unsettled.has(plan.path))
   return {
-    restored: apply.filter(plan => !plan.isNew && plan.lastStatus !== 'deleted').map(plan => plan.path),
-    removed: apply.filter(plan => plan.isNew).map(plan => plan.path),
-    recovered: apply.filter(plan => !plan.isNew && plan.lastStatus === 'deleted').map(plan => plan.path),
+    restored: settled.filter(plan => !plan.isNew && plan.lastStatus !== 'deleted').map(plan => plan.path),
+    removed: settled.filter(plan => plan.isNew).map(plan => plan.path),
+    recovered: settled.filter(plan => !plan.isNew && plan.lastStatus === 'deleted').map(plan => plan.path),
     conflicts: pending.filter(isConflict).map(plan => plan.path),
     unchanged: plans.filter(plan => !differsFromBefore.has(plan.path)).map(plan => plan.path),
+    unsettled: apply.filter(plan => unsettled.has(plan.path)).map(plan => plan.path),
     entry: done,
   }
 }
@@ -60,27 +69,29 @@ export async function travel(shadow: ShadowRepo, history: History, entry: Entry)
   const current = await recordCurrent(shadow)
   const changes = (await shadow.diffTrees(current.tree, entry.id)).filter(change => !shadow.isUnkeptSecret(change.path))
   // From now to the target: a path the target lacks is removed.
-  await applyPlans(
-    shadow,
-    changes.map(change => ({
-      path: change.path,
-      before: entry.id,
-      after: current.commit,
-      isNew: change.status === 'deleted',
-      lastStatus: change.status,
-      isTainted: false,
-    })),
-  )
+  const plans = changes.map(change => ({
+    path: change.path,
+    before: entry.id,
+    after: current.commit,
+    isNew: change.status === 'deleted',
+    lastStatus: change.status,
+    isTainted: false,
+  }))
+  await applyPlans(shadow, plans)
   const title = `Travel to: ${entry.title}`
-  const done = changes.length === 0 ? undefined : await recordRestore(shadow, history, 'travel', title, entry.id)
+  const { entry: done, unsettled } =
+    changes.length === 0
+      ? { entry: undefined, unsettled: new Set<string>() }
+      : await recordRestore(shadow, history, 'travel', title, entry.id, plans)
   const paths = (status: Change['status']) =>
-    changes.filter(change => change.status === status).map(change => change.path)
+    changes.filter(change => change.status === status && !unsettled.has(change.path)).map(change => change.path)
   return {
     restored: paths('modified'),
     removed: paths('deleted'),
     recovered: paths('added'),
     conflicts: [],
     unchanged: [],
+    unsettled: changes.filter(change => unsettled.has(change.path)).map(change => change.path),
     entry: done,
   }
 }
@@ -91,16 +102,22 @@ async function recordCurrent(shadow: ShadowRepo): Promise<{ commit: string; tree
   return shadow.tip()
 }
 
+/**
+ * Records the restore, and checks what it wrote against what landed: a path
+ * not at its `before` state was written again by something still running.
+ */
 async function recordRestore(
   shadow: ShadowRepo,
   history: History,
   kind: 'undo' | 'travel',
   title: string,
   target: string,
-): Promise<Entry | undefined> {
+  applied: PathPlan[],
+): Promise<{ entry: Entry | undefined; unsettled: Set<string> }> {
   await shadow.snapshot()
+  const unsettled = await changedAgainst(shadow, applied, plan => plan.before, await shadow.writeTree())
   const id = await shadow.commitIfChanged(null, kind, title, target)
-  return id === undefined ? undefined : history.entry(id)
+  return { entry: id === undefined ? undefined : await history.entry(id), unsettled }
 }
 
 async function applyPlans(shadow: ShadowRepo, plans: PathPlan[]): Promise<void> {

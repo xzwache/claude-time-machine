@@ -115,6 +115,10 @@ export function restoreText(done: RestoreReport, id: string): string {
     lines.push(`⚠ Left alone, changed by someone else since: ${done.conflicts.join(', ')}`)
     lines.push(`  /tm undo ${id.slice(0, 7)} --force overwrites them (still undoable).`)
   }
+  if (done.unsettled.length) {
+    lines.push(`⚠ Not restored, written again while restoring: ${done.unsettled.join(', ')}`)
+    lines.push('  Something is still writing them. Stop it, then run this again (an undo needs --force).')
+  }
   return lines.join('\n') || 'Nothing to change: the files are already there.'
 }
 

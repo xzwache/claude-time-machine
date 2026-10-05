@@ -6,6 +6,11 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+### Fixed
+
+- An undo or travel checks what landed on disk after it wrote. A file something else wrote again meanwhile (a
+  formatter or codegen still running) is reported as not restored, instead of counted as restored.
+
 ## [0.7.2] - 2026-10-03
 
 ### Fixed

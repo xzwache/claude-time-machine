@@ -1,7 +1,7 @@
 // Tests of the time machine against real git and a real file system.
 // Run with `npm test` (Node 22+, type stripping).
 
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { chmod, mkdtemp, mkdir, readFile, readlink, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -420,6 +420,63 @@ describe('steps and other writers', () => {
     const report = await tm.undo(entry.id)
     assert.deepEqual(report.conflicts, ['src/user.ts'])
     assert.equal(await read('src/user.ts'), 'claude\nand mine\n')
+  })
+
+  test('a writer still running after its step is recorded as outside, and undo leaves its writes', async () => {
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'codegen in the background', SESSION)
+    const go = join(store, 'go')
+    // A formatter and a codegen Claude started in the background, which finish
+    // after the command returned: they wait until the step is recorded.
+    const script = `while [ ! -e '${go}' ]; do sleep 0.02; done; printf 'formatted\\n' > src/user.ts; printf 'gen\\n' > src/gen.ts`
+    const writer = spawn('sh', ['-c', script], { cwd: root, stdio: 'ignore' })
+    const exited = new Promise<number | null>(resolve => writer.on('exit', resolve))
+    await bash(() => put('src/user.ts', 'claude\n'), SESSION, 'npm run codegen &')
+    await writeFile(go, '')
+    assert.equal(await exited, 0)
+    const entry = await tm.finishTurn(id, SESSION, false)
+    assert.ok(entry)
+    assert.deepEqual(entry.changes, [{ status: 'modified', path: 'src/user.ts' }])
+    const report = await tm.undo(entry.id)
+    assert.deepEqual(report.conflicts, ['src/user.ts'])
+    assert.deepEqual(report.restored, [])
+    assert.equal(await read('src/user.ts'), 'formatted\n')
+    assert.equal(await read('src/gen.ts'), 'gen\n')
+  })
+
+  test('a file written again while an undo runs is reported, not called restored', async () => {
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'edit and create', SESSION)
+    await write('src/user.ts', 'claude\n')
+    await write('src/new.ts', 'new\n')
+    const entry = await tm.finishTurn(id, SESSION, false)
+    assert.ok(entry)
+    // A process still writing: right after the restore checks files out, it
+    // writes both again.
+    let isArmed = true
+    tm.use({
+      ...deps,
+      exec: async (argv, init) => {
+        const result = await deps.exec(argv, init)
+        if (isArmed && argv.includes('checkout')) {
+          isArmed = false
+          await put('src/user.ts', 'late\n')
+          await put('src/new.ts', 'late\n')
+        }
+        return result
+      },
+    })
+    const report = await tm.undo(entry.id)
+    tm.use(deps)
+    assert.deepEqual(report.unsettled.sort(), ['src/new.ts', 'src/user.ts'])
+    assert.deepEqual([...report.restored, ...report.removed], [])
+    assert.match(restoreText(report, entry.id), /Not restored, written again while restoring: /)
+    assert.equal(await read('src/user.ts'), 'late\n')
+    // Once the writer has stopped, a forced undo puts the turn back.
+    const forced = await tm.undo(entry.id, true)
+    assert.deepEqual(forced.unsettled, [])
+    assert.equal(await read('src/user.ts'), 'user\n')
+    assert.equal(await exists('src/new.ts'), false)
   })
 
   test('two sessions at once: each undo reverts only its own steps', async () => {
@@ -1047,6 +1104,7 @@ describe('the band', () => {
       removed: files(removed),
       recovered: files(recovered),
       unchanged: files(unchanged),
+      unsettled: [],
       conflicts: [],
       entry: undefined,
     })
