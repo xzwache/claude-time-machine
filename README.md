@@ -19,6 +19,12 @@
   <img src="https://img.shields.io/badge/Claude%20Code-plugin-d97757" alt="Claude Code plugin">
 </p>
 
+Claude changed 17 files, ran a script and deleted something it shouldn't have. You want to go back:
+
+```
+/tm undo
+```
+
 ## Why
 
 Claude Code's `/rewind` brings back files Claude changed with Edit and Write. A lot of real work goes through the
@@ -53,9 +59,21 @@ modified by Bash commands." Use `/rewind` for the conversation and the time mach
 
 ### Why not just…
 
-**…commit more often?** A commit is what you decide to keep. Claude's mistakes land between commits, in the middle
-of a turn, and getting back with `git checkout` or `git stash` throws away your own uncommitted work along with
-Claude's. The time machine keeps every step without touching your repository, and undo leaves your edits alone.
+**…commit more often?** Git is your project's durable history. The time machine is Claude's working history. A
+commit is what you decide to keep, and committing every step leaves you with this:
+
+```
+Claude edited auth.ts
+Claude ran the formatter
+Claude generated files
+Claude tried something
+Claude broke it
+Claude fixed half of it
+```
+
+Claude's mistakes land between commits, in the middle of a turn, and getting back with `git checkout` or `git stash`
+throws away your own uncommitted work along with Claude's. The time machine keeps every step without touching your
+repository, and undo leaves your edits alone.
 
 **…use [bashward](https://github.com/f4rkh4d/bashward)?** bashward is a Bash hook that reads each command, guesses which
 paths it will write (`rm`, `mv`, `cp`, `dd`, `sed -i`, `tee`, `truncate`, `>` redirects) and copies them before it runs.
