@@ -6,6 +6,8 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-10-06
+
 ### Fixed
 
 - An undo or travel no longer reports files as restored when something else wrote them while it ran (a formatter or
@@ -151,7 +153,8 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 - First release: a snapshot before and after every turn in a shadow git repository, `/tm` pane, `/tm undo`,
   `/tm redo`, `/tm travel`, `/tm log`.
 
-[Unreleased]: https://github.com/xzwache/claude-time-machine/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/xzwache/claude-time-machine/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/xzwache/claude-time-machine/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/xzwache/claude-time-machine/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/xzwache/claude-time-machine/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/xzwache/claude-time-machine/compare/v0.6.0...v0.7.0
