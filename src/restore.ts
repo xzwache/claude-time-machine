@@ -17,10 +17,12 @@ export type RestoreReport = {
   /** Paths already back at the state being restored: nothing to do. */
   unchanged: string[]
   /**
-   * Paths written again while the restore ran (a formatter or codegen still
-   * going): not at the state restored, so not counted as restored.
+   * Paths something else wrote while the restore ran (a formatter or codegen
+   * still going): not at the state restored, so not counted as restored.
    */
   unsettled: string[]
+  /** For the unsettled paths: the diff from the state restored to what is on disk. */
+  drift: string
   entry: Entry | undefined
 }
 
@@ -47,11 +49,14 @@ export async function undo(
   const pending = plans.filter(plan => differsFromBefore.has(plan.path))
   const isConflict = (plan: PathPlan) => !isForced && (changedSince.has(plan.path) || plan.isTainted)
   const apply = pending.filter(plan => !isConflict(plan))
-  await applyPlans(shadow, apply)
-  const { entry: done, unsettled } =
-    apply.length === 0
-      ? { entry: undefined, unsettled: new Set<string>() }
-      : await recordRestore(shadow, history, 'undo', undoTitle(entry.title), entry.id, apply)
+  const skipped = await applyPlans(shadow, apply, current.tree)
+  const {
+    entry: done,
+    unsettled,
+    drift,
+  } = apply.length === 0
+    ? { entry: undefined, unsettled: new Set<string>(), drift: '' }
+    : await recordRestore(shadow, history, 'undo', undoTitle(entry.title), entry.id, apply, skipped)
   const settled = apply.filter(plan => !unsettled.has(plan.path))
   return {
     restored: settled.filter(plan => !plan.isNew && plan.lastStatus !== 'deleted').map(plan => plan.path),
@@ -60,6 +65,7 @@ export async function undo(
     conflicts: pending.filter(isConflict).map(plan => plan.path),
     unchanged: plans.filter(plan => !differsFromBefore.has(plan.path)).map(plan => plan.path),
     unsettled: apply.filter(plan => unsettled.has(plan.path)).map(plan => plan.path),
+    drift,
     entry: done,
   }
 }
@@ -77,12 +83,15 @@ export async function travel(shadow: ShadowRepo, history: History, entry: Entry)
     lastStatus: change.status,
     isTainted: false,
   }))
-  await applyPlans(shadow, plans)
+  const skipped = await applyPlans(shadow, plans, current.tree)
   const title = `Travel to: ${entry.title}`
-  const { entry: done, unsettled } =
-    changes.length === 0
-      ? { entry: undefined, unsettled: new Set<string>() }
-      : await recordRestore(shadow, history, 'travel', title, entry.id, plans)
+  const {
+    entry: done,
+    unsettled,
+    drift,
+  } = changes.length === 0
+    ? { entry: undefined, unsettled: new Set<string>(), drift: '' }
+    : await recordRestore(shadow, history, 'travel', title, entry.id, plans, skipped)
   const paths = (status: Change['status']) =>
     changes.filter(change => change.status === status && !unsettled.has(change.path)).map(change => change.path)
   return {
@@ -92,6 +101,7 @@ export async function travel(shadow: ShadowRepo, history: History, entry: Entry)
     conflicts: [],
     unchanged: [],
     unsettled: changes.filter(change => unsettled.has(change.path)).map(change => change.path),
+    drift,
     entry: done,
   }
 }
@@ -103,8 +113,9 @@ async function recordCurrent(shadow: ShadowRepo): Promise<{ commit: string; tree
 }
 
 /**
- * Records the restore, and checks what it wrote against what landed: a path
- * not at its `before` state was written again by something still running.
+ * Records the restore, and checks it against what landed: a path not at its
+ * `before` state was skipped, or written by something else after it was put
+ * back. Such a restore is recorded as incomplete.
  */
 async function recordRestore(
   shadow: ShadowRepo,
@@ -113,26 +124,67 @@ async function recordRestore(
   title: string,
   target: string,
   applied: PathPlan[],
-): Promise<{ entry: Entry | undefined; unsettled: Set<string> }> {
+  skipped: ReadonlySet<string>,
+): Promise<{ entry: Entry | undefined; unsettled: Set<string>; drift: string }> {
   await shadow.snapshot()
-  const unsettled = await changedAgainst(shadow, applied, plan => plan.before, await shadow.writeTree())
-  const id = await shadow.commitIfChanged(null, kind, title, target)
-  return { entry: id === undefined ? undefined : await history.entry(id), unsettled }
+  const tree = await shadow.writeTree()
+  const unsettled = await changedAgainst(shadow, applied, plan => plan.before, tree)
+  for (const path of skipped) unsettled.add(path)
+  let drift = ''
+  for (const [source, paths] of groupBy(
+    applied.filter(plan => unsettled.has(plan.path)),
+    plan => plan.before,
+  )) {
+    for (const chunk of chunks(paths)) {
+      const args = ['diff', '--no-color', '--no-ext-diff', '--no-renames', source, tree, '--', ...chunk]
+      drift += await shadow.git(args, { trim: false })
+    }
+  }
+  const recorded = unsettled.size > 0 ? `${title} (incomplete)` : title
+  const id = await shadow.commitIfChanged(null, kind, recorded, target)
+  return { entry: id === undefined ? undefined : await history.entry(id), unsettled, drift }
 }
 
-async function applyPlans(shadow: ShadowRepo, plans: PathPlan[]): Promise<void> {
+/**
+ * Writes each path back; returns the paths it left alone because something
+ * wrote them after `base`, the tree the restore started from, was taken.
+ */
+async function applyPlans(shadow: ShadowRepo, plans: PathPlan[], base: string): Promise<Set<string>> {
   for (const plan of plans) assertSafePath(plan.path)
+  const skipped = new Set<string>()
+  // Checked again just before each write, so a write made since the restore
+  // began is kept and reported instead of overwritten.
+  const unmoved = async (paths: string[]) => {
+    const moved = await movedSince(shadow, base, paths)
+    for (const path of moved) skipped.add(path)
+    return paths.filter(path => !moved.has(path))
+  }
   // git rm refuses symlinked leading directories and prunes the ones it
   // empties; checkout restores content, mode and symlinks.
   for (const chunk of chunks(plans.filter(plan => plan.isNew).map(plan => plan.path))) {
-    await shadow.git(['rm', '-q', '-f', '-r', '--ignore-unmatch', '--', ...chunk])
+    const paths = await unmoved(chunk)
+    if (paths.length > 0) await shadow.git(['rm', '-q', '-f', '-r', '--ignore-unmatch', '--', ...paths])
   }
-  for (const [source, paths] of groupBy(
+  for (const [source, all] of groupBy(
     plans.filter(plan => !plan.isNew),
     plan => plan.before,
   )) {
-    for (const chunk of chunks(paths)) await shadow.git(['checkout', source, '--', ...chunk])
+    for (const chunk of chunks(all)) {
+      const paths = await unmoved(chunk)
+      if (paths.length > 0) await shadow.git(['checkout', source, '--', ...paths])
+    }
   }
+  return skipped
+}
+
+/**
+ * The paths whose work tree state differs from `tree`. update-index, unlike
+ * add, takes paths that are gone from both the index and the disk.
+ */
+async function movedSince(shadow: ShadowRepo, tree: string, paths: string[]): Promise<Set<string>> {
+  await shadow.git(['update-index', '-q', '--add', '--remove', '--', ...paths], { isLenient: true })
+  const changes = await shadow.diffTrees(tree, await shadow.writeTree(), paths)
+  return new Set(changes.map(change => change.path))
 }
 
 /** The paths whose state at `tree` differs from the snapshot `pick` names. */

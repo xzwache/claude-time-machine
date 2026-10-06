@@ -58,7 +58,8 @@ export function parseMessage(body: string): Meta {
 }
 
 /** An undo of an undo is a redo, and an undo of a redo is an undo again. */
-export function undoTitle(title: string): string {
+export function undoTitle(entryTitle: string): string {
+  const title = entryTitle.replace(/ \(incomplete\)$/, '')
   if (title.startsWith('Undo: ')) return `Redo: ${title.slice(6)}`
   if (title.startsWith('Redo: ')) return `Undo: ${title.slice(6)}`
   return `Undo: ${title}`
