@@ -175,6 +175,9 @@ To keep paths out, list them in a `.tmignore` file (same syntax as `.gitignore`)
 
 - Bash changes inside ignored folders (`node_modules/`, `dist/`) and ignored files over 1 MiB aren't recorded.
 - Edits you make while a Bash command is running count as that command's.
+- Undo and travel check their result. A file something else writes while they run (a formatter or codegen still
+  going) is left as it is and reported as incomplete, with a diff against the snapshot; nothing is called restored
+  unless it matches. A write that lands after that check is not seen until the next snapshot.
 - Empty directories aren't tracked, and nothing outside the project folder is.
 - Windows isn't supported.
 

@@ -98,14 +98,20 @@ export function ago(elapsedMs: number): string {
   return `${Math.floor(elapsedMs / DAY_MS)}d ago`
 }
 
-export function restoreText(done: RestoreReport, id: string): string {
+export function restoreText(done: RestoreReport, id: string, hasDrift = true): string {
   const lines: string[] = []
   const did = actions([
     ['restored', done.restored.length],
     ['removed', done.removed.length],
     ['brought back', done.recovered.length],
   ])
-  if (did !== undefined) lines.push(`✓ ${did.charAt(0).toUpperCase()}${did.slice(1)}`)
+  if (done.unsettled.length) {
+    const changed = `${plural(done.unsettled.length, 'file')} changed by something else while restoring`
+    lines.push(`⚠ Incomplete: ${changed}, not at the snapshot: ${done.unsettled.join(', ')}`)
+    if (did !== undefined) lines.push(`· The other files: ${did}`)
+  } else if (did !== undefined) {
+    lines.push(`✓ ${did.charAt(0).toUpperCase()}${did.slice(1)}`)
+  }
   if (done.unchanged.length) {
     lines.push(
       `· ${plural(done.unchanged.length, 'file')} ${done.unchanged.length === 1 ? 'was' : 'were'} already back`,
@@ -115,11 +121,22 @@ export function restoreText(done: RestoreReport, id: string): string {
     lines.push(`⚠ Left alone, changed by someone else since: ${done.conflicts.join(', ')}`)
     lines.push(`  /tm undo ${id.slice(0, 7)} --force overwrites them (still undoable).`)
   }
+  if (done.unsettled.length) {
+    if (hasDrift && done.drift !== '') lines.push(clipDiff(done.drift).replace(/\n$/, ''))
+    lines.push('  Something may still be writing them. Stop it, then run this again (an undo needs --force).')
+  }
   return lines.join('\n') || 'Nothing to change: the files are already there.'
 }
 
+/** A diff cut at a line within the limit, saying so when cut. */
+function clipDiff(diff: string): string {
+  if (diff.length <= DIFF_LIMIT) return diff
+  const cut = diff.slice(0, DIFF_LIMIT)
+  return `${cut.slice(0, cut.lastIndexOf('\n') + 1)}… (diff cut; /tm show has the files)\n`
+}
+
 export function summaryLine(done: RestoreReport, id: string): string {
-  return restoreText(done, id).split('\n').join('  ')
+  return restoreText(done, id, false).split('\n').join('  ')
 }
 
 /**

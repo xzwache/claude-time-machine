@@ -6,6 +6,13 @@ All notable changes to this project are documented here. Versions before 0.5.0 w
 
 ## [Unreleased]
 
+### Fixed
+
+- An undo or travel no longer reports files as restored when something else wrote them while it ran (a formatter or
+  codegen still going). It checks each file again just before writing it, leaving one changed since the restore
+  began as it is, and checks every file against the snapshot afterwards. If any differ, it says the restore is
+  incomplete, lists them with a diff, and marks the snapshot "(incomplete)".
+
 ## [0.7.2] - 2026-10-03
 
 ### Fixed

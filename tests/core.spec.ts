@@ -1,7 +1,7 @@
 // Tests of the time machine against real git and a real file system.
 // Run with `npm test` (Node 22+, type stripping).
 
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { chmod, mkdtemp, mkdir, readFile, readlink, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -23,7 +23,7 @@ import type { FileHeat, Heat } from '../src/heat.ts'
 import { heatPage, pageLibrary } from '../src/heat-page.ts'
 import { TimeMachine, deleteProject, listProjects } from '../src/index.ts'
 import type { Deps, ExecResult } from '../src/index.ts'
-import { ago, restoreText, turnSummary } from '../src/format.ts'
+import { ago, restoreText, summaryLine, turnSummary } from '../src/format.ts'
 import { firstLine } from '../src/message.ts'
 import { versionProblem } from '../src/version.ts'
 import {
@@ -422,6 +422,28 @@ describe('steps and other writers', () => {
     assert.equal(await read('src/user.ts'), 'claude\nand mine\n')
   })
 
+  test('a writer still running after its step is recorded as outside, and undo leaves its writes', async () => {
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'codegen in the background', SESSION)
+    const go = join(store, 'go')
+    // A formatter and a codegen Claude started in the background, which finish
+    // after the command returned: they wait until the step is recorded.
+    const script = `while [ ! -e '${go}' ]; do sleep 0.02; done; printf 'formatted\\n' > src/user.ts; printf 'gen\\n' > src/gen.ts`
+    const writer = spawn('sh', ['-c', script], { cwd: root, stdio: 'ignore' })
+    const exited = new Promise<number | null>(resolve => writer.on('exit', resolve))
+    await bash(() => put('src/user.ts', 'claude\n'), SESSION, 'npm run codegen &')
+    await writeFile(go, '')
+    assert.equal(await exited, 0)
+    const entry = await tm.finishTurn(id, SESSION, false)
+    assert.ok(entry)
+    assert.deepEqual(entry.changes, [{ status: 'modified', path: 'src/user.ts' }])
+    const report = await tm.undo(entry.id)
+    assert.deepEqual(report.conflicts, ['src/user.ts'])
+    assert.deepEqual(report.restored, [])
+    assert.equal(await read('src/user.ts'), 'formatted\n')
+    assert.equal(await read('src/gen.ts'), 'gen\n')
+  })
+
   test('two sessions at once: each undo reverts only its own steps', async () => {
     await tm.beginTurn('a1', 'session a', 'session-a')
     await tm.beginTurn('b1', 'session b', 'session-b')
@@ -442,6 +464,186 @@ describe('steps and other writers', () => {
   test("a turn keeps Claude's answer", async () => {
     const entry = await turn('explain and fix', () => put('src/user.ts', 'fixed\n'))
     assert.equal(entry?.answer, 'answer to explain and fix')
+  })
+})
+
+describe('something else writing while a restore runs', () => {
+  type Argv = readonly string[]
+  const isWrite = (argv: Argv) => argv.includes('checkout') || (argv.includes('rm') && argv.includes('-r'))
+  const isRecheck = (argv: Argv) => argv.includes('update-index')
+
+  /**
+   * Runs `restore` with another writer that does `write` once, exactly at the
+   * first git call `at` picks: before it, or after it returned. Deterministic,
+   * no timing involved.
+   */
+  async function racing<T>(
+    at: (argv: Argv) => boolean,
+    when: 'before' | 'after',
+    write: () => Promise<void>,
+    restore: () => Promise<T>,
+  ) {
+    let isArmed = true
+    tm.use({
+      ...deps,
+      exec: async (argv, init) => {
+        const isNow = isArmed && at(argv)
+        if (isNow) isArmed = false
+        if (isNow && when === 'before') await write()
+        const result = await deps.exec(argv, init)
+        if (isNow && when === 'after') await write()
+        return result
+      },
+    })
+    try {
+      return await restore()
+    } finally {
+      tm.use(deps)
+    }
+  }
+
+  async function editTurn() {
+    const id = `turn-${++turns}`
+    await tm.beginTurn(id, 'edit', SESSION)
+    await write('src/user.ts', 'claude\n')
+    const entry = await tm.finishTurn(id, SESSION, false)
+    assert.ok(entry)
+    return entry
+  }
+
+  test('a file written after it was put back makes the undo incomplete, with the path and the diff', async () => {
+    const entry = await editTurn()
+    const report = await racing(
+      isWrite,
+      'after',
+      () => put('src/user.ts', 'late\n'),
+      () => tm.undo(entry.id),
+    )
+    assert.deepEqual(report.unsettled, ['src/user.ts'])
+    assert.deepEqual(report.restored, [])
+    assert.match(report.drift, /^-user$/m)
+    assert.match(report.drift, /^\+late$/m)
+    const text = restoreText(report, entry.id)
+    assert.match(
+      text,
+      /^⚠ Incomplete: 1 file changed by something else while restoring, not at the snapshot: src\/user\.ts$/m,
+    )
+    assert.match(text, /^\+late$/m)
+    assert.doesNotMatch(text, /✓|Restored|brought back/)
+    assert.equal(report.entry?.title, 'Undo: edit (incomplete)')
+    assert.equal(await read('src/user.ts'), 'late\n')
+  })
+
+  test('the same undo with no other writer reports as before', async () => {
+    const entry = await editTurn()
+    const report = await tm.undo(entry.id)
+    assert.deepEqual(report.unsettled, [])
+    assert.equal(report.drift, '')
+    assert.equal(restoreText(report, entry.id), '✓ Restored 1 file')
+    assert.equal(report.entry?.title, 'Undo: edit')
+  })
+
+  test('a write to a file the undo does not touch leaves it complete', async () => {
+    const entry = await editTurn()
+    const report = await racing(
+      isWrite,
+      'after',
+      () => put('src/auth.ts', 'late\n'),
+      () => tm.undo(entry.id),
+    )
+    assert.deepEqual(report.unsettled, [])
+    assert.equal(restoreText(report, entry.id), '✓ Restored 1 file')
+    assert.equal(await read('src/user.ts'), 'user\n')
+    assert.equal(await read('src/auth.ts'), 'late\n')
+  })
+
+  test('a deleted file brought back and deleted again at once makes the undo incomplete', async () => {
+    const entry = await turn('delete legacy', () => unlink(file('src/legacy.ts')))
+    assert.ok(entry)
+    const report = await racing(
+      isWrite,
+      'after',
+      () => unlink(file('src/legacy.ts')),
+      () => tm.undo(entry.id),
+    )
+    assert.deepEqual(report.unsettled, ['src/legacy.ts'])
+    assert.deepEqual(report.recovered, [])
+    assert.match(report.drift, /^-legacy$/m)
+    assert.doesNotMatch(restoreText(report, entry.id), /✓|brought back/)
+    assert.equal(await exists('src/legacy.ts'), false)
+  })
+
+  test('a created file the undo removed and something wrote again makes it incomplete', async () => {
+    const entry = await turn('create', () => put('src/new.ts', 'new\n'))
+    assert.ok(entry)
+    const report = await racing(
+      isWrite,
+      'after',
+      () => put('src/new.ts', 'late\n'),
+      () => tm.undo(entry.id),
+    )
+    assert.deepEqual(report.unsettled, ['src/new.ts'])
+    assert.deepEqual(report.removed, [])
+    assert.match(report.drift, /^\+late$/m)
+  })
+
+  test('a write made after the undo began is kept, not overwritten, and reported', async () => {
+    const entry = await editTurn()
+    const report = await racing(
+      isRecheck,
+      'before',
+      () => put('src/user.ts', 'late\n'),
+      () => tm.undo(entry.id),
+    )
+    assert.deepEqual(report.unsettled, ['src/user.ts'])
+    assert.deepEqual(report.restored, [])
+    assert.equal(await read('src/user.ts'), 'late\n')
+  })
+
+  test('travel checks what landed the same way', async () => {
+    const entry = await editTurn()
+    const before = entry.base ?? ''
+    const report = await racing(
+      isWrite,
+      'after',
+      () => put('src/user.ts', 'late\n'),
+      () => tm.travel(before),
+    )
+    assert.deepEqual(report.unsettled, ['src/user.ts'])
+    assert.deepEqual(report.restored, [])
+    assert.match(report.drift, /^\+late$/m)
+    assert.match(report.entry?.title ?? '', /\(incomplete\)$/)
+  })
+
+  test('once the writer has stopped, a forced undo completes, and a redo title drops the mark', async () => {
+    const entry = await editTurn()
+    const first = await racing(
+      isWrite,
+      'after',
+      () => put('src/user.ts', 'late\n'),
+      () => tm.undo(entry.id),
+    )
+    assert.deepEqual(first.unsettled, ['src/user.ts'])
+    const forced = await tm.undo(entry.id, true)
+    assert.deepEqual(forced.unsettled, [])
+    assert.deepEqual(forced.restored, ['src/user.ts'])
+    assert.equal(await read('src/user.ts'), 'user\n')
+    assert.ok(first.entry)
+    const redo = await tm.undo(first.entry.id, true)
+    assert.equal(redo.entry?.title, 'Redo: edit')
+  })
+
+  test('the band line says it is incomplete without the diff', async () => {
+    const entry = await editTurn()
+    const report = await racing(
+      isWrite,
+      'after',
+      () => put('src/user.ts', 'late\n'),
+      () => tm.undo(entry.id),
+    )
+    const line = summaryLine(report, entry.id)
+    assert.match(line, /^⚠ Incomplete: /)
+    assert.doesNotMatch(line, /\n|\+late/)
   })
 })
 
@@ -1047,6 +1249,8 @@ describe('the band', () => {
       removed: files(removed),
       recovered: files(recovered),
       unchanged: files(unchanged),
+      unsettled: [],
+      drift: '',
       conflicts: [],
       entry: undefined,
     })
