@@ -1,6 +1,6 @@
 {
   "name": "claude-time-machine",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "private": true,
   "description": "A Claude Code mod: every Claude turn becomes a snapshot you can review, undo or travel back to.",
   "license": "MIT",
